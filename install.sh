@@ -120,43 +120,20 @@ else
     fi
 fi
 
-echo -e "\${BLUE}[INFO] Membangun dan Menjalankan Dashboard...\${NC}"
+echo "[INFO] Membangun dan Menjalankan Dashboard..."
 
-# Create a persistent session-signing secret once; preserve it on future updates.
-# .env is excluded from Git and made readable only by root.
+# Preserve persistent secrets across updates; .env must never be committed.
 umask 077
 touch .env
+if ! command -v openssl >/dev/null 2>&1; then
+    echo "[ERROR] openssl diperlukan untuk membuat secret yang aman."
+    exit 1
+fi
 if ! grep -Eq '^SECRET_KEY=.+$' .env; then
-    if ! command -v openssl >/dev/null 2>&1; then
-        echo -e "\${RED}[ERROR] openssl diperlukan untuk membuat SECRET_KEY yang aman.\${NC}"
-        exit 1
-    fi
     sed -i '/^SECRET_KEY=/d' .env
     printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
 fi
-# Create a one-time bootstrap token if this installation does not have one.
-# It is revealed only through the private server-side .env file.
-if ! grep -Eq '^SETUP_TOKEN=.+
-if $COMPOSE_CMD up --build -d; then
-    echo ""
-    echo -e "\${GREEN}=================================================\${NC}"
-    echo -e "\${GREEN}      INSTALASI SUKSES!             \${NC}"
-    echo -e "\${GREEN}=================================================\${NC}"
-    echo ""
-
-    IP_ADDR=$(hostname -I | awk '{print $1}')
-
-    echo -e "Silakan akses Dashboard Admin di:"
-    echo -e "\${BLUE}   http://$IP_ADDR:$DASHBOARD_PORT \${NC}"
-    echo -e "Jika memakai port 80, URL juga dapat dibuka tanpa menulis :80."
-    echo -e "Untuk mengubah port, atur DASHBOARD_PORT di file .env."
-    echo ""
-    echo -e "Terima kasih telah menggunakan produk ini."
-else
-    echo -e "\${RED}[ERROR] Gagal menjalankan Docker Container.\${NC}"
-    exit 1
-fi
- .env; then
+if ! grep -Eq '^SETUP_TOKEN=.+$' .env; then
     sed -i '/^SETUP_TOKEN=/d' .env
     printf 'SETUP_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
 fi
@@ -165,20 +142,16 @@ chmod 600 .env
 # Rebuild in place; preserve active services and security configuration.
 if $COMPOSE_CMD up --build -d; then
     echo ""
-    echo -e "\${GREEN}=================================================\${NC}"
-    echo -e "\${GREEN}      INSTALASI SUKSES!             \${NC}"
-    echo -e "\${GREEN}=================================================\${NC}"
+    echo "================================================="
+    echo "EKA DASHBOARD INSTALASI/PEMBARUAN SUKSES"
+    echo "================================================="
     echo ""
-
     IP_ADDR=$(hostname -I | awk '{print $1}')
-
-    echo -e "Silakan akses Dashboard Admin di:"
-    echo -e "\${BLUE}   http://$IP_ADDR:$DASHBOARD_PORT \${NC}"
-    echo -e "Jika memakai port 80, URL juga dapat dibuka tanpa menulis :80."
-    echo -e "Untuk mengubah port, atur DASHBOARD_PORT di file .env."
+    echo "Akses Dashboard: http://$IP_ADDR:$DASHBOARD_PORT"
+    echo "Token setup awal tersedia di file privat .env:"
+    echo "sudo sed -n 's/^SETUP_TOKEN=//p' /root/eka_dashboard/.env"
     echo ""
-    echo -e "Terima kasih telah menggunakan produk ini."
 else
-    echo -e "\${RED}[ERROR] Gagal menjalankan Docker Container.\${NC}"
+    echo "[ERROR] Gagal menjalankan Docker Container."
     exit 1
 fi
