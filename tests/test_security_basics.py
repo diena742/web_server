@@ -611,7 +611,7 @@ class PermissionHierarchyTests(unittest.TestCase):
                 "last_active": time.time(),
             })
         config = {"require_auth": True, "session_timeout": 3600}
-        result = type("CommandResult", (), {"stdout": "active\\n", "returncode": 0})()
+        result = type("CommandResult", (), {"stdout": "active\n", "returncode": 0})()
         with patch.object(dashboard, "load_security_config", return_value=config), \
              patch.object(dashboard, "load_app_settings", return_value={"services": [{"id": "ssh", "name": "SSH Server"}]}), \
              patch.object(dashboard, "run_host_command", return_value=result) as run_command:
