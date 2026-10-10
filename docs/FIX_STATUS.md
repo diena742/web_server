@@ -32,6 +32,7 @@ Branch pengembangan memiliki patch keamanan dan perbaikan fungsional, serta tes 
 - Operasi Mobile Backup memeriksa batas path kanonis. Rename, move, dan copy menolak konflik tujuan yang sudah ada, serta menolak operasi menyalin/memindahkan direktori ke dalam dirinya sendiri.
 - Endpoint daftar Mobile Backup tidak lagi membuat subdirektori sembarang saat GET, dan mengabaikan entry symlink.
 - Upload Mobile Backup menolak nama yang tidak valid serta menolak file tujuan yang sudah ada.
+- Upload Mobile Backup membuat file tujuan dengan operasi eksklusif atomik; entri symlink yang sudah ada, termasuk dangling symlink, ditolak agar upload tidak mengikuti link ke luar direktori backup.
 - Deteksi IP LAN/Tailscale tidak menggunakan alamat contoh yang tertanam di source; alamat dideteksi dari network namespace host atau diberikan melalui environment/config yang tervalidasi.
 - Operasi rename/move/copy tidak menimpa tujuan yang sudah ada dan tidak dapat memindahkan/menyalin direktori ke dalam dirinya sendiri.
 - Deteksi IP LAN/Tailscale tidak menggunakan alamat contoh yang tertanam di source; alamat dideteksi dari network namespace host atau diberikan melalui environment/config yang tervalidasi.
@@ -58,13 +59,13 @@ Branch pengembangan memiliki patch keamanan dan perbaikan fungsional, serta tes 
 
 ## Validasi otomatis
 
-Workflow: [Source Validation](https://github.com/diena742/web_server/actions/runs/38048972065)
+Workflow: [Source Validation](https://github.com/diena742/web_server/actions/runs/38049077495)
 
-Hasil commit `25bf074819194a200b02d2870ecc01e4a345b9fa`:
+Hasil commit `8992f668ff03e41a452ef83a19167631b7e281bb`:
 
 - Kompilasi sumber Python: sukses.
 - Instalasi dependensi: sukses.
-- Unit/regression tests: **47 tes lulus**.
+- Unit/regression tests: **48 tes lulus**.
 - Validasi sintaks `static/script.js` dan `static/files.js`: sukses.
 - Validasi sintaks `install.sh` dan `setup_wg.sh`: sukses.
 
