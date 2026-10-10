@@ -391,5 +391,133 @@ class PrivilegedRouteAuthorizationTests(unittest.TestCase):
         self.assertEqual(nginx_response.status_code, 403)
 
 
+
+class BackupRestoreTests(unittest.TestCase):
+    def setUp(self):
+        dashboard.app.testing = True
+        self.client = dashboard.app.test_client()
+        self.security_config = {
+            "require_auth": True,
+            "session_timeout": 3600,
+            "max_login_attempts": 5,
+            "lockout_duration": 300,
+        }
+        with self.client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "admin-user",
+                "role": "admin",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+
+    def test_backup_includes_canonical_application_config_files(self):
+        import tarfile
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = os.path.join(temporary, "data")
+            backup_dir = os.path.join(data_dir, "backups")
+            base_dir = os.path.join(temporary, "base")
+            os.makedirs(backup_dir)
+            os.makedirs(base_dir)
+            settings_path = os.path.join(data_dir, "app_settings.json")
+            security_path = os.path.join(data_dir, "security_config.json")
+            compose_path = os.path.join(base_dir, "docker-compose.yml")
+            for path, body in (
+                (settings_path, '{"general":{"server_name":"test"}}'),
+                (security_path, '{"username":"owner"}'),
+                (compose_path, 'services: {}'),
+            ):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(body)
+
+            with patch.object(dashboard, "DATA_DIR", data_dir), \
+                 patch.object(dashboard, "BASE_DIR", base_dir), \
+                 patch.object(dashboard, "BACKUP_DIR", backup_dir), \
+                 patch.object(dashboard, "APP_SETTINGS_FILE", settings_path), \
+                 patch.object(dashboard, "SECURITY_CONFIG_FILE", security_path), \
+                 patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+                 patch.object(dashboard, "audit_log"):
+                response = self.client.post(
+                    "/api/backup/create",
+                    json={"name": "config-test", "include_config": True, "include_docker": True},
+                )
+                self.assertEqual(response.status_code, 200)
+                filename = response.get_json()["filename"]
+                with tarfile.open(os.path.join(backup_dir, filename), "r:gz") as archive:
+                    names = set(archive.getnames())
+
+            self.assertIn("app_settings.json", names)
+            self.assertIn("security_config.json", names)
+            self.assertIn("docker-compose.yml", names)
+            self.assertNotIn("settings.json", names)
+
+    def test_restore_writes_config_to_canonical_paths_and_ignores_symlinks(self):
+        import io
+        import tarfile
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = os.path.join(temporary, "data")
+            backup_dir = os.path.join(data_dir, "backups")
+            base_dir = os.path.join(temporary, "base")
+            os.makedirs(backup_dir)
+            os.makedirs(base_dir)
+            settings_path = os.path.join(data_dir, "app_settings.json")
+            security_path = os.path.join(data_dir, "security_config.json")
+            compose_path = os.path.join(base_dir, "docker-compose.yml")
+            archive_path = os.path.join(backup_dir, "restore-test.tar.gz")
+
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for name, body in (
+                    ("app_settings.json", b'{"general":{"server_name":"restored"}}'),
+                    ("security_config.json", b'{"username":"restored-owner"}'),
+                    ("docker-compose.yml", b"services: {}"),
+                ):
+                    info = tarfile.TarInfo(name)
+                    info.size = len(body)
+                    archive.addfile(info, io.BytesIO(body))
+                link = tarfile.TarInfo("untrusted-link")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "../../outside.txt"
+                archive.addfile(link)
+
+            with patch.object(dashboard, "DATA_DIR", data_dir), \
+                 patch.object(dashboard, "BASE_DIR", base_dir), \
+                 patch.object(dashboard, "BACKUP_DIR", backup_dir), \
+                 patch.object(dashboard, "APP_SETTINGS_FILE", settings_path), \
+                 patch.object(dashboard, "SECURITY_CONFIG_FILE", security_path), \
+                 patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+                 patch.object(dashboard, "audit_log"):
+                response = self.client.post("/api/backup/restore", json={"id": "restore-test.tar.gz"})
+
+            self.assertEqual(response.status_code, 200)
+            with open(settings_path, encoding="utf-8") as handle:
+                self.assertIn("restored", handle.read())
+            with open(security_path, encoding="utf-8") as handle:
+                self.assertIn("restored-owner", handle.read())
+            with open(compose_path, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "services: {}")
+            self.assertFalse(os.path.exists(os.path.join(temporary, "outside.txt")))
+            self.assertEqual(os.stat(security_path).st_mode & 0o777, 0o600)
+
+
+class BackupDownloadAuthorizationTests(unittest.TestCase):
+    def test_readonly_user_cannot_download_backup_archives(self):
+        dashboard.app.testing = True
+        client = dashboard.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "viewer",
+                "role": "readonly",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+        with patch.object(
+            dashboard, "load_security_config",
+            return_value={"require_auth": True, "session_timeout": 3600},
+        ):
+            response = client.get("/api/backup/download/backup-test.tar.gz")
+        self.assertEqual(response.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
