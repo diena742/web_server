@@ -1,0 +1,45 @@
+name: Source Validation
+
+on:
+  push:
+    branches:
+      - main
+      - "fix/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: Syntax and shell validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Compile Python sources
+        run: python -m py_compile app.py app_server.py convert_md_to_pdf.py trigger_install.py trigger_debug.py
+
+      - name: Validate JavaScript syntax
+        run: |
+          node --check static/script.js
+          node --check static/files.js
+
+      - name: Validate shell script syntax
+        run: |
+          bash -n install.sh
+          bash -n setup_wg.sh
