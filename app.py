@@ -551,35 +551,53 @@ def setup_admin_page():
 def setup_admin_api():
     config = load_security_config()
     default_hash = hashlib.sha256('admin'.encode()).hexdigest()
-    
-    # Allow setup if password is default OR session setup_mode is active
-    if config['password_hash'] != default_hash and not session.get('setup_mode'):
-        # If already setup, forbid unless valid admin login? No, just forbid.
+
+    # Setup is permitted only while the untouched first-run sentinel is active.
+    # Never allow a session flag to reopen the owner-creation endpoint.
+    if not hmac.compare_digest(str(config.get('password_hash', '')), default_hash):
         return jsonify({'error': 'Setup already completed'}), 403
-        
-    data = request.json
+
+    expected_token = os.environ.get('SETUP_TOKEN', '').strip()
+    if not expected_token:
+        return jsonify({
+            'error': 'Secure setup is not configured. Set SETUP_TOKEN in the server .env file.'
+        }), 503
+
+    data = request.get_json(silent=True) or {}
     username = data.get('username')
     password = data.get('password')
-    
-    if not username or not password or len(password) < 12:
-        return jsonify({'error': 'Username and password are required; password must be at least 12 characters'}), 400
-        
-    # Update config - first user is always 'owner'
+    supplied_token = data.get('setup_token', '')
+
+    if not isinstance(supplied_token, str) or not hmac.compare_digest(
+        supplied_token, expected_token
+    ):
+        return jsonify({'error': 'Invalid setup token'}), 403
+
+    if not isinstance(username, str) or not username.strip():
+        return jsonify({'error': 'Username is required'}), 400
+    if not isinstance(password, str) or len(password) < 12:
+        return jsonify({
+            'error': 'Password must be at least 12 characters'
+        }), 400
+
+    # First account is always the owner; the one-time token prevents a random
+    # LAN client from claiming the account during first-run setup.
+    username = username.strip()
     config['username'] = username
     config['password_hash'] = create_password_hash(password)
     config['role'] = 'owner'
     save_security_config(config)
-    
-    # Auto Login
+
     ip = request.remote_addr
     session['logged_in'] = True
     session['username'] = username
     session['role'] = 'owner'
     session['login_time'] = time.time()
-    session['session_id'] = hashlib.md5(f"{username}{time.time()}{ip}".encode()).hexdigest()[:16]
-    session.pop('setup_mode', None) # Clear flag
-    
-    # Register in active sessions
+    session['session_id'] = hashlib.md5(
+        f"{username}{time.time()}{ip}".encode()
+    ).hexdigest()[:16]
+    session.pop('setup_mode', None)
+
     ACTIVE_SESSIONS[session['session_id']] = {
         'username': username,
         'role': 'owner',
@@ -587,8 +605,8 @@ def setup_admin_api():
         'last_activity': session['login_time'],
         'ip': ip
     }
-    
     return jsonify({'success': True})
+
 
 @app.route('/api/auth/login', methods=['POST'])
 def login_api():
