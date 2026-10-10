@@ -250,5 +250,81 @@ class AuthenticationGuardTests(unittest.TestCase):
         self.assertTrue(dashboard.verify_password_hash(owner_password, config["password_hash"]))
 
 
+
+
+class ServiceControlAuthorizationTests(unittest.TestCase):
+    def setUp(self):
+        dashboard.app.testing = True
+        self.client = dashboard.app.test_client()
+        self.security_config = {
+            "require_auth": True,
+            "session_timeout": 3600,
+            "max_login_attempts": 5,
+            "lockout_duration": 300,
+        }
+
+    def _login_as(self, role):
+        with self.client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "test-user",
+                "role": role,
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+
+    def test_unlisted_service_is_rejected_without_host_command(self):
+        self._login_as("admin")
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+             patch.object(dashboard, "load_app_settings", return_value={"services": [{"id": "ssh"}]}), \
+             patch.object(dashboard, "run_host_command") as run_command:
+            response = self.client.post(
+                "/api/services/control",
+                json={"service": "unexpected-service", "action": "restart"},
+            )
+        self.assertEqual(response.status_code, 400)
+        run_command.assert_not_called()
+
+    def test_operator_cannot_stop_configured_service(self):
+        self._login_as("operator")
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+             patch.object(dashboard, "load_app_settings", return_value={"services": [{"id": "ssh"}]}), \
+             patch.object(dashboard, "run_host_command") as run_command:
+            response = self.client.post(
+                "/api/services/control",
+                json={"service": "ssh", "action": "stop"},
+            )
+        self.assertEqual(response.status_code, 403)
+        run_command.assert_not_called()
+
+    def test_operator_can_restart_configured_service(self):
+        self._login_as("operator")
+        completed = type("Completed", (), {"returncode": 0})()
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+             patch.object(dashboard, "load_app_settings", return_value={"services": [{"id": "ssh"}]}), \
+             patch.object(dashboard, "run_host_command", return_value=completed) as run_command, \
+             patch.object(dashboard, "audit_log"):
+            response = self.client.post(
+                "/api/services/control",
+                json={"service": "ssh", "action": "restart"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"success": True})
+        run_command.assert_called_once_with(["systemctl", "restart", "ssh"])
+
+    def test_failed_systemctl_command_is_not_reported_as_success(self):
+        self._login_as("admin")
+        completed = type("Completed", (), {"returncode": 1})()
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+             patch.object(dashboard, "load_app_settings", return_value={"services": [{"id": "ssh"}]}), \
+             patch.object(dashboard, "run_host_command", return_value=completed), \
+             patch.object(dashboard, "audit_log"):
+            response = self.client.post(
+                "/api/services/control",
+                json={"service": "ssh", "action": "restart"},
+            )
+        self.assertEqual(response.status_code, 502)
+        self.assertNotEqual(response.get_json(), {"success": True})
+
 if __name__ == "__main__":
     unittest.main()
