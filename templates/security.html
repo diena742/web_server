@@ -978,6 +978,10 @@
                 showMsg('access-msg', 'Username and password required', 'error');
                 return;
             }
+            if (password.length < 12) {
+                showMsg('access-msg', 'Password must be at least 12 characters', 'error');
+                return;
+            }
 
             fetch('/api/security/users', {
                 method: 'POST',
