@@ -4,6 +4,7 @@ import socket
 from flask import Flask, jsonify, render_template, request, Response, session, redirect, url_for, stream_with_context, send_file
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import time
 import subprocess
@@ -276,6 +277,34 @@ def save_app_settings(settings):
     with open(APP_SETTINGS_FILE, 'w') as f:
         json.dump(settings, f, indent=2)
 
+PASSWORD_HASH_METHOD = 'pbkdf2:sha256:600000'
+
+
+def create_password_hash(password):
+    """Hash a password using a deliberately slow password-hashing algorithm."""
+    return generate_password_hash(password, method=PASSWORD_HASH_METHOD)
+
+
+def verify_password_hash(password, stored_hash):
+    """Verify modern hashes and legacy SHA-256 hashes during migration."""
+    if not isinstance(password, str) or not isinstance(stored_hash, str):
+        return False
+    if stored_hash.startswith(('pbkdf2:', 'scrypt:')):
+        try:
+            return check_password_hash(stored_hash, password)
+        except (ValueError, TypeError):
+            return False
+    legacy_hash = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    return hmac.compare_digest(legacy_hash, stored_hash)
+
+
+def is_legacy_password_hash(stored_hash):
+    return not (
+        isinstance(stored_hash, str)
+        and stored_hash.startswith(('pbkdf2:', 'scrypt:'))
+    )
+
+
 def load_security_config():
     default_config = {
         'username': 'admin',
@@ -520,7 +549,7 @@ def setup_admin_api():
         
     # Update config - first user is always 'owner'
     config['username'] = username
-    config['password_hash'] = hashlib.sha256(password.encode()).hexdigest()
+    config['password_hash'] = create_password_hash(password)
     config['role'] = 'owner'
     save_security_config(config)
     
@@ -554,13 +583,22 @@ def login_api():
         return jsonify({'error': f'Too many failed attempts. Try again in {remaining}s'}), 429
     
     config = load_security_config()
-    data = request.json
+    data = request.get_json(silent=True) or {}
     username = data.get('username', '')
     password = data.get('password', '')
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    
-    # Check main user
-    if username == config['username'] and password_hash == config['password_hash']:
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify({'error': 'Invalid credentials'}), 400
+
+    # Keep the initial-install sentinel out of the normal login flow.
+    default_hash = hashlib.sha256('admin'.encode()).hexdigest()
+    if hmac.compare_digest(str(config.get('password_hash', '')), default_hash):
+        return jsonify({'error': 'Initial setup required'}), 403
+
+    # Check main user and upgrade legacy SHA-256 hashes after successful login.
+    if username == config['username'] and verify_password_hash(password, config.get('password_hash')):
+        if is_legacy_password_hash(config.get('password_hash')):
+            config['password_hash'] = create_password_hash(password)
+            save_security_config(config)
         session['logged_in'] = True
         session['username'] = username
         session['role'] = config.get('role', 'admin')
@@ -580,9 +618,12 @@ def login_api():
         audit_log('LOGIN_SUCCESS', f"User {username} logged in (role: {session['role']})", username)
         return jsonify({'success': True, 'role': session['role']})
     
-    # Check additional users
+    # Check additional users and migrate legacy hashes after successful login.
     for user in config.get('users', []):
-        if username == user.get('username') and password_hash == user.get('password_hash'):
+        if username == user.get('username') and verify_password_hash(password, user.get('password_hash')):
+            if is_legacy_password_hash(user.get('password_hash')):
+                user['password_hash'] = create_password_hash(password)
+                save_security_config(config)
             session['logged_in'] = True
             session['username'] = username
             session['role'] = user.get('role', 'readonly')
@@ -1603,14 +1644,13 @@ def change_password():
     current_password = data.get('current_password', '')
     new_password = data.get('new_password', '')
     
-    current_hash = hashlib.sha256(current_password.encode()).hexdigest()
-    if current_hash != config['password_hash']:
+    if not verify_password_hash(current_password, config.get('password_hash')):
         return jsonify({'error': 'Current password is incorrect'}), 400
     
     if len(new_password) < 4:
         return jsonify({'error': 'Password must be at least 4 characters'}), 400
     
-    config['password_hash'] = hashlib.sha256(new_password.encode()).hexdigest()
+    config['password_hash'] = create_password_hash(new_password)
     save_security_config(config)
     audit_log('PASSWORD_CHANGED', 'Password was changed', session.get('username', 'unknown'))
     return jsonify({'success': True})
@@ -1660,7 +1700,7 @@ def add_user():
     
     config['users'].append({
         'username': username,
-        'password_hash': hashlib.sha256(password.encode()).hexdigest(),
+        'password_hash': create_password_hash(password),
         'role': role
     })
     
