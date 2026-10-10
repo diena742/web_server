@@ -81,7 +81,12 @@ Endpoint Mobile Backup sekarang tidak lagi memakai header rahasia yang tertanam 
 ```bash
 cd /root/eka_dashboard
 umask 077
-printf 'MOBILE_ACCESS_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+touch .env
+sed -i '/^MOBILE_ACCESS_TOKEN=/d' .env
+TOKEN="$(openssl rand -hex 32)"
+printf 'MOBILE_ACCESS_TOKEN=%s\n' "$TOKEN" >> .env
+chmod 600 .env
+printf 'Simpan token ini di konfigurasi aplikasi Android: %s\n' "$TOKEN"
 sudo docker compose up -d --build
 ```
 
