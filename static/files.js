@@ -581,13 +581,21 @@ function openEditor(item) {
     editorText.value = "Loading...";
 
     fetch(`/api/files/content?path=${encodeURIComponent(item.path)}`)
-        .then(r => r.json())
-        .then(data => {
+        .then(async response => {
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok && !data.error) {
+                data.error = `Request failed (HTTP ${response.status})`;
+            }
             if (data.error) {
                 editorText.value = "Error: " + data.error;
-            } else {
+            } else if (typeof data.content === 'string') {
                 editorText.value = data.content;
+            } else {
+                editorText.value = "Error: server returned an invalid file response.";
             }
+        })
+        .catch(() => {
+            editorText.value = "Error: unable to load file contents. Check the connection and permissions.";
         });
 }
 
@@ -601,13 +609,19 @@ function saveFile() {
             path: currentEditingPath,
             content: editorText.value
         })
-    }).then(r => r.json()).then(data => {
+    }).then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok && !data.error) {
+            data.error = `Request failed (HTTP ${response.status})`;
+        }
         if (data.success) {
             alert("Saved!");
             closeEditor();
         } else {
-            alert("Error: " + data.error);
+            alert("Error: " + (data.error || "The server returned an invalid response."));
         }
+    }).catch(() => {
+        alert("Save failed: unable to reach the server. Your editor contents are still available; try again.");
     });
 }
 
