@@ -5222,7 +5222,8 @@ def mobile_backup_move():
     real_dest_dir = os.path.realpath(dest_dir)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
     
-    if (not is_within_base(real_src, real_base) or real_src == real_base\n            or not is_within_base(real_dest_dir, real_base)):
+    if (not is_within_base(real_src, real_base) or real_src == real_base
+            or not is_within_base(real_dest_dir, real_base)):
         return jsonify({"error": "Akses ditolak"}), 403
         
     try:
