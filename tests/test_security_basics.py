@@ -519,5 +519,78 @@ class BackupDownloadAuthorizationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+
+class HostCommandSafetyTests(unittest.TestCase):
+    def setUp(self):
+        dashboard.app.testing = True
+        self.client = dashboard.app.test_client()
+        self.security_config = {
+            "require_auth": True,
+            "session_timeout": 3600,
+            "max_login_attempts": 5,
+            "lockout_duration": 300,
+        }
+        with self.client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "owner",
+                "role": "owner",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+
+    def test_update_command_quotes_working_directory_and_uses_argv(self):
+        import docker
+        container = type("Container", (), {
+            "name": "eka_dashboard",
+            "labels": {"com.docker.compose.project.working_dir": "/tmp/install ; touch /tmp/nope"},
+        })()
+        client = type("DockerClient", (), {
+            "containers": type("Containers", (), {
+                "list": lambda self: [container],
+            })(),
+        })()
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+             patch.object(docker, "from_env", return_value=client), \
+             patch.object(dashboard.subprocess, "Popen") as popen:
+            response = self.client.post("/api/perform-update", json={})
+
+        self.assertEqual(response.status_code, 200)
+        args, kwargs = popen.call_args
+        self.assertIsInstance(args[0], list)
+        self.assertFalse(kwargs.get("shell", False))
+        self.assertIn("cd '/tmp/install ; touch /tmp/nope' &&", args[0][-1])
+        self.assertEqual(args[0][-3:], ["sh", "-c", args[0][-1]])
+
+    def test_update_rejects_null_byte_in_working_directory(self):
+        import docker
+        container = type("Container", (), {
+            "name": "eka_dashboard",
+            "labels": {"com.docker.compose.project.working_dir": "/tmp/unsafe\\x00path"},
+        })()
+        client = type("DockerClient", (), {
+            "containers": type("Containers", (), {
+                "list": lambda self: [container],
+            })(),
+        })()
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+             patch.object(docker, "from_env", return_value=client), \
+             patch.object(dashboard.subprocess, "Popen") as popen:
+            response = self.client.post("/api/perform-update", json={})
+        self.assertEqual(response.status_code, 400)
+        popen.assert_not_called()
+
+    def test_readonly_cannot_run_host_disk_analysis_commands(self):
+        with self.client.session_transaction() as sess:
+            sess.update({"role": "readonly", "username": "viewer"})
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+             patch.object(dashboard.subprocess, "run") as run_command:
+            disk_response = self.client.get("/api/disk-analysis")
+            storage_response = self.client.get("/api/storage/analyze?path=/var/log")
+        self.assertEqual(disk_response.status_code, 403)
+        self.assertEqual(storage_response.status_code, 403)
+        run_command.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
