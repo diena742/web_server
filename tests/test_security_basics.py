@@ -951,5 +951,49 @@ class BackupArchivePathSafetyTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
 
+
+class MobileBackupUploadSymlinkTests(unittest.TestCase):
+    def test_upload_rejects_dangling_symlink_destination(self):
+        import io
+        import tempfile
+        dashboard.app.testing = True
+        client = dashboard.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "admin-user",
+                "role": "admin",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+
+        with tempfile.TemporaryDirectory() as temporary:
+            backup_root = os.path.join(temporary, "MobileBackup")
+            outside_dir = os.path.join(temporary, "outside")
+            os.makedirs(backup_root)
+            os.makedirs(outside_dir)
+            outside_target = os.path.join(outside_dir, "written.txt")
+            dangling_link = os.path.join(backup_root, "written.txt")
+            os.symlink(outside_target, dangling_link)
+
+            with patch.object(dashboard, "BACKUP_BASE_DIR", backup_root), \
+                 patch.object(dashboard, "load_security_config", return_value={
+                     "require_auth": True, "session_timeout": 3600
+                 }), \
+                 patch.dict(os.environ, {"MOBILE_ACCESS_TOKEN": ""}):
+                response = client.post(
+                    "/api/mobile-backup/upload",
+                    data={
+                        "path": backup_root,
+                        "file": (io.BytesIO(b"should-not-write"), "written.txt"),
+                    },
+                    content_type="multipart/form-data",
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertTrue(os.path.islink(dangling_link))
+            self.assertFalse(os.path.exists(outside_target))
+
+
 if __name__ == "__main__":
     unittest.main()
