@@ -74,7 +74,29 @@ Jika instalasi sukses, Anda akan melihat pesan seperti:
 
 ---
 
-## 5. FAQ & Troubleshooting (Kendala & Solusi)
+## 5. Token autentikasi aplikasi Mobile Backup
+
+Endpoint Mobile Backup sekarang tidak lagi memakai header rahasia yang tertanam di source sebagai bypass login global. Untuk penggunaan aplikasi Android, buat token khusus dan simpan hanya pada server:
+
+```bash
+cd /root/eka_dashboard
+umask 077
+printf 'MOBILE_ACCESS_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+sudo docker compose up -d --build
+```
+
+Simpan token tersebut di konfigurasi header aplikasi Android sebagai `X-Mobile-Key`. Jangan menaruh nilai token pada source code, commit, screenshot publik, atau laporan bug. Jika aplikasi Android belum dapat mengganti header token, gunakan login dashboard berbasis cookie atau perbarui konfigurasi klien terlebih dahulu.
+
+File `.env` sudah dicakup oleh `.gitignore`; tetap verifikasi sebelum commit:
+```bash
+git status --short
+```
+
+Token ini hanya berlaku untuk API `/api/mobile-backup/*`, bukan untuk melewati autentikasi pada endpoint dashboard, file manager, Docker, LXD, atau terminal.
+
+---
+
+## 6. FAQ & Troubleshooting (Kendala & Solusi)
 
 Berikut adalah 15 daftar kendala yang sering terjadi beserta solusinya:
 
