@@ -881,5 +881,75 @@ class MobileBackupPageAuthorizationTests(unittest.TestCase):
         self.assertIn(response.status_code, (302, 403))
 
 
+
+class BackupArchivePathSafetyTests(unittest.TestCase):
+    def setUp(self):
+        dashboard.app.testing = True
+        self.client = dashboard.app.test_client()
+        self.security_config = {"require_auth": True, "session_timeout": 3600}
+        with self.client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "admin-user",
+                "role": "admin",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+
+    def test_backup_resolver_rejects_traversal_and_symlink_archives(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            backup_dir = os.path.join(temporary, "backups")
+            os.mkdir(backup_dir)
+            outside = os.path.join(temporary, "outside.tar.gz")
+            with open(outside, "wb") as handle:
+                handle.write(b"not a real backup")
+            valid_path = os.path.join(backup_dir, "backup-valid.tar.gz")
+            with open(valid_path, "wb") as handle:
+                handle.write(b"archive placeholder")
+            symlink_path = os.path.join(backup_dir, "backup-link.tar.gz")
+            os.symlink(outside, symlink_path)
+
+            with patch.object(dashboard, "BACKUP_DIR", backup_dir):
+                resolved, error_status = dashboard.resolve_backup_path("backup-valid.tar.gz")
+                self.assertEqual(resolved, os.path.realpath(valid_path))
+                self.assertIsNone(error_status)
+
+                for invalid_id in ("../outside.tar.gz", "subdir/backup.tar.gz", "bad\\\\name.tar.gz", None, [], "no-extension.txt"):
+                    with self.subTest(invalid_id=invalid_id):
+                        result, status = dashboard.resolve_backup_path(invalid_id)
+                        self.assertIsNone(result)
+                        self.assertEqual(status, 400)
+
+                result, status = dashboard.resolve_backup_path("backup-link.tar.gz")
+                self.assertIsNone(result)
+                self.assertEqual(status, 400)
+
+    def test_backup_download_rejects_symlink_archive(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            backup_dir = os.path.join(temporary, "backups")
+            os.mkdir(backup_dir)
+            outside = os.path.join(temporary, "secret.txt")
+            with open(outside, "w", encoding="utf-8") as handle:
+                handle.write("sensitive test content")
+            os.symlink(outside, os.path.join(backup_dir, "backup-link.tar.gz"))
+
+            with patch.object(dashboard, "BACKUP_DIR", backup_dir), \
+                 patch.object(dashboard, "load_security_config", return_value=self.security_config):
+                response = self.client.get("/api/backup/download/backup-link.tar.gz")
+            self.assertEqual(response.status_code, 400)
+            self.assertNotIn(b"sensitive test content", response.data)
+
+    def test_backup_restore_rejects_non_object_json(self):
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config):
+            response = self.client.post(
+                "/api/backup/restore",
+                data='["unexpected"]',
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()
