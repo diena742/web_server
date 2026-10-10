@@ -3276,13 +3276,13 @@ def create_backup():
         with tarfile.open(filepath, 'w:gz') as tar:
             # Backup konfigurasi
             if include_config:
-                settings_file = os.path.join(DATA_DIR, 'settings.json')
-                if os.path.exists(settings_file):
-                    tar.add(settings_file, arcname='settings.json')
-                
-                security_file = os.path.join(BASE_DIR, 'security_config.json')
-                if os.path.exists(security_file):
-                    tar.add(security_file, arcname='security_config.json')
+                # Use the canonical paths actually read by this application.
+                for source_path, archive_name in (
+                    (APP_SETTINGS_FILE, 'app_settings.json'),
+                    (SECURITY_CONFIG_FILE, 'security_config.json'),
+                ):
+                    if os.path.isfile(source_path):
+                        tar.add(source_path, arcname=archive_name)
             
             # Backup docker compose
             if include_docker:
@@ -3308,7 +3308,7 @@ def create_backup():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/backup/download/<backup_id>')
-@login_required
+@admin_required
 def download_backup(backup_id):
     """Download file backup"""
     try:
@@ -3347,18 +3347,51 @@ def restore_backup():
         if not os.path.exists(filepath):
             return jsonify({'error': 'Backup tidak ditemukan'}), 404
         
-        # Ekstrak backup
+        # Restore only known regular files into their canonical application paths.
+        # Avoid tar.extract(): archive symlink/hardlink entries must never create
+        # filesystem links during a restore.
+        import shutil
+        import tempfile
+
+        restore_targets = {
+            'app_settings.json': APP_SETTINGS_FILE,
+            'settings.json': APP_SETTINGS_FILE,  # legacy archive compatibility
+            'security_config.json': SECURITY_CONFIG_FILE,
+            'docker-compose.yml': os.path.join(BASE_DIR, 'docker-compose.yml'),
+            'users.db': os.path.join(DATA_DIR, 'users.db'),
+        }
         with tarfile.open(filepath, 'r:gz') as tar:
-            for member in tar.getmembers():
-                # Restore ke lokasi yang sesuai
-                if member.name == 'settings.json':
-                    tar.extract(member, DATA_DIR)
-                elif member.name == 'security_config.json':
-                    tar.extract(member, BASE_DIR)
-                elif member.name == 'docker-compose.yml':
-                    tar.extract(member, BASE_DIR)
-                elif member.name == 'users.db':
-                    tar.extract(member, DATA_DIR)
+            members = tar.getmembers()
+            has_current_settings = any(
+                member.name == 'app_settings.json' and member.isfile()
+                for member in members
+            )
+            for member in members:
+                if not member.isfile():
+                    continue
+                if member.name == 'settings.json' and has_current_settings:
+                    continue
+                target_path = restore_targets.get(member.name)
+                if not target_path:
+                    continue
+                source = tar.extractfile(member)
+                if source is None:
+                    continue
+
+                target_dir = os.path.dirname(target_path)
+                os.makedirs(target_dir, exist_ok=True)
+                temp_path = None
+                try:
+                    with source, tempfile.NamedTemporaryFile(
+                        mode='wb', dir=target_dir, delete=False
+                    ) as output:
+                        temp_path = output.name
+                        shutil.copyfileobj(source, output)
+                    os.chmod(temp_path, 0o600 if target_path == SECURITY_CONFIG_FILE else 0o640)
+                    os.replace(temp_path, target_path)
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        os.remove(temp_path)
         
         audit_log('BACKUP_RESTORED', f'Backup di-restore: {backup_id}', session.get('username'))
         
