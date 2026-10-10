@@ -1,6 +1,9 @@
 import hashlib
 import os
+import tempfile
+import time
 import unittest
+from urllib.parse import urlencode
 from unittest.mock import patch
 
 import app as dashboard
@@ -89,6 +92,99 @@ class AuthenticationGuardTests(unittest.TestCase):
             headers={"Origin": "https://untrusted.example"},
         )
         self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+
+
+    def test_read_only_file_path_is_scoped_to_configured_roots(self):
+        with tempfile.TemporaryDirectory() as allowed_root, tempfile.TemporaryDirectory() as outside_root:
+            allowed_file = os.path.join(allowed_root, "safe.txt")
+            outside_file = os.path.join(outside_root, "private.txt")
+            with open(allowed_file, "w", encoding="utf-8") as handle:
+                handle.write("shared data")
+            with open(outside_file, "w", encoding="utf-8") as handle:
+                handle.write("secret")
+            with patch.dict(os.environ, {"FILES_READONLY_ROOTS": allowed_root}):
+                self.assertTrue(dashboard.file_path_allowed_for_role(allowed_file, "readonly"))
+                self.assertFalse(dashboard.file_path_allowed_for_role(outside_file, "readonly"))
+                self.assertTrue(dashboard.file_path_allowed_for_role(outside_file, "admin"))
+
+    def test_read_only_file_content_cannot_escape_configured_root(self):
+        with tempfile.TemporaryDirectory() as allowed_root, tempfile.TemporaryDirectory() as outside_root:
+            safe_file = os.path.join(allowed_root, "safe.txt")
+            secret_file = os.path.join(outside_root, "secret.txt")
+            with open(safe_file, "w", encoding="utf-8") as handle:
+                handle.write("visible")
+            with open(secret_file, "w", encoding="utf-8") as handle:
+                handle.write("not visible")
+            with patch.dict(os.environ, {"FILES_READONLY_ROOTS": allowed_root}):
+                with self.client.session_transaction() as sess:
+                    sess.update({"logged_in": True, "username": "viewer", "role": "readonly", "last_active": time.time()})
+                allowed = self.client.get("/api/files/content?" + urlencode({"path": safe_file}))
+                denied = self.client.get("/api/files/content?" + urlencode({"path": secret_file}))
+            self.assertEqual(allowed.status_code, 200)
+            self.assertEqual(allowed.get_json()["content"], "visible")
+            self.assertEqual(denied.status_code, 403)
+
+    def test_read_only_settings_response_redacts_integration_secrets(self):
+        config = {
+            "require_auth": True,
+            "session_timeout": 3600,
+        }
+        settings = {
+            "integrations": {
+                "telegram_token": "bot-secret",
+                "telegram_chat_id": "private-chat",
+                "webhook_url": "https://example.test/?token=secret",
+            },
+            "mqtt": {"enabled": True, "password": "mqtt-secret", "host": "broker.local"},
+        }
+        with self.client.session_transaction() as sess:
+            sess.update({"logged_in": True, "username": "viewer", "role": "readonly", "last_active": time.time()})
+        with patch.object(dashboard, "load_security_config", return_value=config), patch.object(
+            dashboard, "load_app_settings", return_value=settings.copy()
+        ):
+            response = self.client.get("/api/settings")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["integrations"]["telegram_token"], "")
+        self.assertEqual(payload["integrations"]["telegram_chat_id"], "")
+        self.assertEqual(payload["integrations"]["webhook_url"], "")
+        self.assertEqual(payload["mqtt"]["password"], "")
+
+    def test_read_only_role_cannot_access_docker_logs(self):
+        config = {"require_auth": True, "session_timeout": 3600}
+        with self.client.session_transaction() as sess:
+            sess.update({"logged_in": True, "username": "viewer", "role": "readonly", "last_active": time.time()})
+        with patch.object(dashboard, "load_security_config", return_value=config):
+            response = self.client.get("/api/docker/example/logs")
+        self.assertEqual(response.status_code, 403)
+
+    def test_additional_user_can_change_only_own_password(self):
+        owner_password = "owner current password"
+        user_password = "viewer current password"
+        config = {
+            "username": "owner",
+            "password_hash": dashboard.create_password_hash(owner_password),
+            "require_auth": True,
+            "session_timeout": 3600,
+            "users": [{
+                "username": "viewer",
+                "role": "readonly",
+                "password_hash": dashboard.create_password_hash(user_password),
+            }],
+        }
+        new_password = "viewer new password 123"
+        with self.client.session_transaction() as sess:
+            sess.update({"logged_in": True, "username": "viewer", "role": "readonly", "last_active": time.time()})
+        with patch.object(dashboard, "load_security_config", return_value=config), patch.object(
+            dashboard, "save_security_config"
+        ):
+            response = self.client.post(
+                "/api/security/change-password",
+                json={"current_password": user_password, "new_password": new_password},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(dashboard.verify_password_hash(new_password, config["users"][0]["password_hash"]))
+        self.assertTrue(dashboard.verify_password_hash(owner_password, config["password_hash"]))
 
 
 if __name__ == "__main__":
