@@ -118,6 +118,44 @@ fi
 
 echo -e "${BLUE}[INFO] Membangun dan Menjalankan Dashboard...${NC}"
 
+# Create a persistent session-signing secret once; preserve it on future updates.
+# .env is excluded from Git and is made readable only by root.
+umask 077
+touch .env
+if ! grep -Eq '^SECRET_KEY=.{1,}
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "${GREEN}      INSTALASI SUKSES!             ${NC}"
+    echo -e "${GREEN}=================================================${NC}"
+    echo ""
+    
+    # Ambil IP (Coba ambil IP non-lokal pertama)
+    IP_ADDR=$(hostname -I | awk '{print $1}')
+    
+    echo -e "Silakan akses Dashboard Admin di:"
+    echo -e "${BLUE}   http://$IP_ADDR:$DASHBOARD_PORT ${NC}"
+    echo -e "Jika memakai port 80, URL juga dapat dibuka tanpa menulis :80."
+    echo -e "Untuk mengubah port, atur DASHBOARD_PORT di file .env."
+
+    
+    echo ""
+    echo -e "Terima kasih telah menggunakan produk ini."
+else
+    echo -e "${RED}[ERROR] Gagal menjalankan Docker Container.${NC}"
+    exit 1
+fi
+ .env; then
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo -e "${RED}[ERROR] openssl diperlukan untuk membuat SECRET_KEY yang aman.${NC}"
+        exit 1
+    fi
+    sed -i '/^SECRET_KEY=/d' .env
+    printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
+fi
+chmod 600 .env
+
 # Rebuild in place; preserve active services and security configuration.
 $COMPOSE_CMD up --build -d
 
