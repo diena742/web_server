@@ -429,8 +429,11 @@ def login_required(f):
         
         # 1. Global Authentication Toggle
         if not config.get('require_auth', True):
+            # Disabling login is a public-monitoring mode, not an implicit grant
+            # of administrator privileges to every unauthenticated visitor.
             session['logged_in'] = True
-            session['role'] = 'admin'
+            session['username'] = 'guest'
+            session['role'] = 'readonly'
             return f(*args, **kwargs)
 
         # Mobile API access is scoped to the mobile-backup routes. Never use a
@@ -2111,7 +2114,7 @@ def casaos_status():
         return jsonify({'online': False})
 
 @app.route('/api/casaos/access', methods=['POST'])
-@login_required
+@admin_required
 def casaos_access():
     """Grant temporary direct access to CasaOS for authenticated user"""
     ip = request.remote_addr
@@ -3211,7 +3214,7 @@ def backup_page():
     return render_template('backup.html')
 
 @app.route('/api/backup/list')
-@login_required
+@admin_required
 def list_backups():
     """Mendapatkan daftar backup yang tersedia"""
     try:
@@ -5182,6 +5185,8 @@ def mobile_backup_auth_required(f):
             last_active = session.get('last_active', session.get('login_time', time.time()))
             timeout = config.get('session_timeout', 3600)
             if time.time() - last_active <= timeout:
+                if session.get('role') not in ('owner', 'admin'):
+                    return jsonify({'error': 'Admin access required for mobile backup'}), 403
                 session['last_active'] = time.time()
                 return f(*args, **kwargs)
             session.clear()
@@ -5567,7 +5572,7 @@ def nginx_status():
     return jsonify({'status': 'unknown', 'running': False})
 
 @app.route('/api/websites/reload_nginx', methods=['POST'])
-@login_required
+@admin_required
 def reload_nginx():
     """Reload Nginx config"""
     try:
@@ -6035,7 +6040,10 @@ def get_web_shield_domain():
 def web_monitor_config():
     config_path = os.path.join(DATA_DIR, 'web_shield.json')
     if request.method == 'POST':
-        domain = request.json.get('domain')
+        if session.get('role') not in ('owner', 'admin'):
+            return jsonify({'error': 'Admin access required'}), 403
+        data = request.get_json(silent=True) or {}
+        domain = data.get('domain')
         if not domain:
             return jsonify({'error': 'Domain required'}), 400
         # Clean domain (remove http/https)
