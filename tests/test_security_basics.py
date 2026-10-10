@@ -326,5 +326,70 @@ class ServiceControlAuthorizationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertNotEqual(response.get_json(), {"success": True})
 
+
+class PrivilegedRouteAuthorizationTests(unittest.TestCase):
+    def setUp(self):
+        dashboard.app.testing = True
+        self.client = dashboard.app.test_client()
+        self.security_config = {
+            "require_auth": True,
+            "session_timeout": 3600,
+            "max_login_attempts": 5,
+            "lockout_duration": 300,
+        }
+
+    def _login_as(self, role):
+        with self.client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "test-user",
+                "role": role,
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+
+    def test_disabling_authentication_does_not_grant_admin_role(self):
+        with patch.object(
+            dashboard, "load_security_config",
+            return_value={"require_auth": False, "session_timeout": 3600},
+        ):
+            response = self.client.post("/api/perform-update", json={})
+        self.assertEqual(response.status_code, 403)
+
+    def test_readonly_user_cannot_grant_casaos_access(self):
+        self._login_as("readonly")
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config):
+            response = self.client.post("/api/casaos/access", json={})
+        self.assertEqual(response.status_code, 403)
+
+    def test_readonly_user_cannot_access_mobile_backup_mutations(self):
+        self._login_as("readonly")
+        with patch.dict(os.environ, {"MOBILE_ACCESS_TOKEN": ""}), patch.object(
+            dashboard, "load_security_config", return_value=self.security_config
+        ):
+            response = self.client.post(
+                "/api/mobile-backup/delete",
+                json={"path": "/tmp/not-a-real-backup-file"},
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_readonly_user_cannot_change_web_monitor_domain(self):
+        self._login_as("readonly")
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config):
+            response = self.client.post(
+                "/api/web_monitor/config",
+                json={"domain": "example.invalid"},
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_readonly_user_cannot_list_backups_or_reload_nginx(self):
+        self._login_as("readonly")
+        with patch.object(dashboard, "load_security_config", return_value=self.security_config):
+            backup_response = self.client.get("/api/backup/list")
+            nginx_response = self.client.post("/api/websites/reload_nginx", json={})
+        self.assertEqual(backup_response.status_code, 403)
+        self.assertEqual(nginx_response.status_code, 403)
+
+
 if __name__ == "__main__":
     unittest.main()
