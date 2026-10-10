@@ -735,5 +735,129 @@ class WebShieldDomainValidationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+
+class MobileBackupSafetyTests(unittest.TestCase):
+    def setUp(self):
+        dashboard.app.testing = True
+        self.client = dashboard.app.test_client()
+        self.security_config = {"require_auth": True, "session_timeout": 3600}
+        with self.client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "admin-user",
+                "role": "admin",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+
+    def test_copy_move_and_rename_do_not_overwrite_existing_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as base_dir:
+            source_dir = os.path.join(base_dir, "source")
+            dest_dir = os.path.join(base_dir, "dest")
+            os.makedirs(source_dir)
+            os.makedirs(dest_dir)
+            cases = [
+                ("rename.txt", "existing.txt"),
+                ("move.txt", "move.txt"),
+                ("copy.txt", "copy.txt"),
+            ]
+            for source_name, dest_name in cases:
+                with open(os.path.join(source_dir, source_name), "w", encoding="utf-8") as f:
+                    f.write(f"source-{source_name}")
+                with open(os.path.join(dest_dir if source_name != "rename.txt" else source_dir, dest_name), "w", encoding="utf-8") as f:
+                    f.write(f"destination-{dest_name}")
+
+            with patch.object(dashboard, "BACKUP_BASE_DIR", base_dir), \
+                 patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+                 patch.dict(os.environ, {"MOBILE_ACCESS_TOKEN": ""}):
+                rename_response = self.client.post(
+                    "/api/mobile-backup/rename",
+                    json={"path": os.path.join(source_dir, "rename.txt"), "new_name": "existing.txt"},
+                )
+                move_response = self.client.post(
+                    "/api/mobile-backup/move",
+                    json={"src": os.path.join(source_dir, "move.txt"), "dest_dir": dest_dir},
+                )
+                copy_response = self.client.post(
+                    "/api/mobile-backup/copy",
+                    json={"src": os.path.join(source_dir, "copy.txt"), "dest_dir": dest_dir},
+                )
+
+            self.assertEqual(rename_response.status_code, 409)
+            self.assertEqual(move_response.status_code, 409)
+            self.assertEqual(copy_response.status_code, 409)
+            with open(os.path.join(source_dir, "rename.txt"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "source-rename.txt")
+            with open(os.path.join(source_dir, "existing.txt"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "destination-existing.txt")
+            with open(os.path.join(source_dir, "move.txt"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "source-move.txt")
+            with open(os.path.join(dest_dir, "move.txt"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "destination-move.txt")
+            with open(os.path.join(source_dir, "copy.txt"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "source-copy.txt")
+            with open(os.path.join(dest_dir, "copy.txt"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "destination-copy.txt")
+
+    def test_listing_missing_subfolder_does_not_create_it(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            base_dir = os.path.join(temporary, "MobileBackup")
+            os.makedirs(base_dir)
+            missing = os.path.join(base_dir, "should-not-be-created")
+            with patch.object(dashboard, "BACKUP_BASE_DIR", base_dir), \
+                 patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+                 patch.dict(os.environ, {"MOBILE_ACCESS_TOKEN": ""}):
+                response = self.client.get("/api/mobile-backup/files", query_string={"path": missing})
+            self.assertEqual(response.status_code, 404)
+            self.assertFalse(os.path.exists(missing))
+
+    def test_network_detection_does_not_return_stale_example_ips(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            config_file = os.path.join(temporary, "missing-config.json")
+            with patch.object(dashboard, "MOBILE_BACKUP_CONFIG_FILE", config_file), \
+                 patch.dict(os.environ, {"MOBILE_BACKUP_LAN_IP": "", "MOBILE_BACKUP_TS_IP": ""}), \
+                 patch.object(dashboard.subprocess, "run", side_effect=FileNotFoundError):
+                result = dashboard.get_mobile_backup_config()
+        self.assertEqual(result, {"lan_ip": "", "ts_ip": ""})
+
+    def test_network_detection_uses_host_default_route_and_tailscale_interface(self):
+        import tempfile
+        route = type("CommandResult", (), {
+            "returncode": 0,
+            "stdout": "default via 192.168.1.1 dev eth0 proto dhcp\\n",
+        })()
+        addresses = type("CommandResult", (), {
+            "returncode": 0,
+            "stdout": (
+                "2: eth0    inet 192.168.1.50/24 brd 192.168.1.255 scope global eth0\\n"
+                "5: tailscale0    inet 100.100.1.2/32 scope global tailscale0\\n"
+            ),
+        })()
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.object(dashboard, "MOBILE_BACKUP_CONFIG_FILE", os.path.join(temporary, "none.json")), \
+                 patch.dict(os.environ, {"MOBILE_BACKUP_LAN_IP": "", "MOBILE_BACKUP_TS_IP": ""}), \
+                 patch.object(dashboard.subprocess, "run", side_effect=[route, addresses]):
+                result = dashboard.get_mobile_backup_config()
+        self.assertEqual(result, {"lan_ip": "192.168.1.50", "ts_ip": "100.100.1.2"})
+
+    def test_mobile_backup_config_rejects_non_ip_values(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            config_file = os.path.join(temporary, "mobile_backup_config.json")
+            with patch.object(dashboard, "MOBILE_BACKUP_CONFIG_FILE", config_file), \
+                 patch.object(dashboard, "DATA_DIR", temporary), \
+                 patch.object(dashboard, "load_security_config", return_value=self.security_config), \
+                 patch.dict(os.environ, {"MOBILE_ACCESS_TOKEN": ""}):
+                response = self.client.post(
+                    "/api/mobile-backup/config",
+                    json={"lan_ip": "../../etc/passwd", "ts_ip": "100.100.1.2"},
+                )
+            self.assertEqual(response.status_code, 400)
+            self.assertFalse(os.path.exists(config_file))
+
+
 if __name__ == "__main__":
     unittest.main()
