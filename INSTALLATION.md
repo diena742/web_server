@@ -49,9 +49,28 @@ sudo docker compose up -d
 
 Jika port tetap bentrok, pilih port yang tidak digunakan. Jangan menghentikan proses host yang tidak dikenal hanya untuk membebaskan port.
 
-## 4. Login awal
+## 4. Login awal dan token setup satu kali
 
-Buka dashboard dari jaringan tepercaya. Pada instalasi baru, wizard meminta Anda membuat akun owner. Gunakan password sekurang-kurangnya 12 karakter. Jangan membiarkan dashboard yang belum dikonfigurasi terbuka ke jaringan publik.
+Installer membuat token setup acak dan menyimpannya di `/root/eka_dashboard/.env`. Sebelum membuka wizard, ambil token melalui shell server tepercaya:
+
+```bash
+sudo sed -n 's/^SETUP_TOKEN=//p' /root/eka_dashboard/.env
+```
+
+Masukkan token tersebut pada halaman Setup Admin, lalu buat akun owner dengan password sekurang-kurangnya 12 karakter. Jangan mengirim token melalui issue/PR atau membiarkan terminal/server setup dapat diakses orang yang tidak dipercaya.
+
+Jika melakukan instalasi manual tanpa `install.sh`, buat token sebelum menyalakan Compose:
+
+```bash
+umask 077
+touch .env
+printf 'SETUP_TOKEN=%s\\n' "$(openssl rand -hex 32)" >> .env
+printf 'SECRET_KEY=%s\\n' "$(openssl rand -hex 32)" >> .env
+chmod 600 .env
+sudo docker compose up --build -d
+```
+
+Pastikan nilai tersebut diteruskan ke container melalui `docker-compose.yml`. Tanpa `SETUP_TOKEN` yang dikonfigurasi, endpoint setup menolak pembuatan akun pertama.
 
 ## 5. Secret, token mobile, dan origin browser
 
