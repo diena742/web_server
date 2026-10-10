@@ -5,6 +5,7 @@ let currentPage = 1;
 let hasMore = false;
 let isLoading = false;
 let viewMode = 'drives'; // 'files' or 'drives'
+let ignoreTouchRowClickUntil = 0;
 
 // Quick folder list for sidebar
 const quickFolders = ['/', '/root', '/home', '/var', '/etc', '/tmp', '/opt'];
@@ -20,8 +21,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     buildSidebarTree();
 
-    // Close context menu on click outside
+    // Close the context menu on outside clicks, but not the synthetic click
+    // that some mobile browsers dispatch after a long-press menu opens.
     document.addEventListener('click', (e) => {
+        if (Date.now() < ignoreTouchRowClickUntil && e.target.closest('.fm-table tr')) {
+            ignoreTouchRowClickUntil = 0;
+            return;
+        }
         if (!e.target.closest('.context-menu')) {
             hideContextMenu();
         }
@@ -343,6 +349,7 @@ function renderTable(items, isNew) {
             startY = touch.clientY;
             pressTimer = window.setTimeout(() => {
                 pressTimer = null;
+                ignoreTouchRowClickUntil = Date.now() + 800;
                 showContextMenu({
                     preventDefault: () => {},
                     clientX: startX,
