@@ -2820,7 +2820,7 @@ def network_page():
     return render_template('network.html')
 
 @app.route('/api/network/info')
-@login_required
+@admin_required
 def get_network_info():
     """Mendapatkan informasi jaringan saat ini (HOST)"""
     try:
@@ -3015,7 +3015,7 @@ def storage_page():
     return render_template('storage.html')
 
 @app.route('/api/storage/disks')
-@login_required
+@admin_required
 def get_storage_disks():
     """Mendapatkan daftar disk dan partisi yang sangat lengkap menggunakan lsblk"""
     try:
@@ -3475,7 +3475,7 @@ def sharing_page():
     return render_template('sharing.html')
 
 @app.route('/api/smb/status')
-@login_required
+@admin_required
 def get_smb_status():
     """Mendapatkan status Samba"""
     try:
@@ -3544,7 +3544,7 @@ def get_smb_status():
         return jsonify({'error': str(e), 'installed': False, 'running': False}), 500
 
 @app.route('/api/smb/shares')
-@login_required
+@admin_required
 def get_smb_shares():
     """Mendapatkan daftar share aktif"""
     try:
@@ -3739,7 +3739,7 @@ def vpn_page():
     return render_template('vpn.html')
 
 @app.route('/api/vpn/status')
-@login_required
+@admin_required
 def get_vpn_status():
     """Mendapatkan status WireGuard"""
     try:
@@ -3792,7 +3792,7 @@ def get_vpn_status():
         return jsonify({'error': str(e), 'installed': False}), 500
 
 @app.route('/api/vpn/clients')
-@login_required
+@admin_required
 def get_vpn_clients():
     """Mendapatkan daftar client VPN"""
     try:
@@ -3931,7 +3931,7 @@ AllowedIPs = {client_ip.replace('/32', '/32')}
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/vpn/client/<name>/config')
-@login_required
+@admin_required
 def get_vpn_client_config(name):
     """Mendapatkan konfigurasi client"""
     try:
@@ -4083,7 +4083,7 @@ def store_page():
     return render_template('store.html')
 
 @app.route('/api/store/catalog')
-@login_required
+@admin_required
 def get_app_catalog():
     """Mendapatkan katalog aplikasi (Default + Custom)"""
     try:
@@ -4118,7 +4118,7 @@ def get_app_catalog():
         return jsonify({'error': str(e), 'catalog': []}), 500
 
 @app.route('/api/store/installed')
-@login_required
+@admin_required
 def get_installed_apps():
     """Mendapatkan detail aplikasi yang sudah terinstall (Status & Ports)"""
     try:
@@ -4953,7 +4953,7 @@ def install_app():
 # =========================================
 
 @app.route('/api/zerotier/status')
-@login_required
+@admin_required
 def zerotier_status():
     """Get ZeroTier status from HOST"""
     try:
@@ -5049,7 +5049,7 @@ def zerotier_leave():
 
 # --- VPN SMART SCAN ---
 @app.route('/api/vpn/scan')
-@login_required
+@admin_required
 def vpn_smart_scan():
     """Otomatis mendeteksi semua layanan VPN/Network di host"""
     try:
@@ -5559,7 +5559,7 @@ def mobile_backup_upload():
 # ==========================================
 
 @app.route('/websites')
-@login_required
+@admin_required
 def websites_page():
     """List semua Nginx virtual hosts yang aktif"""
     sites = []
@@ -5595,7 +5595,7 @@ def websites_page():
     return render_template('websites.html', sites=sites)
 
 @app.route('/api/websites/nginx_status')
-@login_required
+@admin_required
 def nginx_status():
     """Cek status Nginx service — host-aware (works inside Docker with pid:host)"""
     try:
@@ -5730,7 +5730,7 @@ def _classify_threat(entry):
     return None
 
 @app.route('/api/websites/threats')
-@login_required
+@admin_required
 def get_threats():
     """
     Scan Nginx access log and return:
@@ -5902,7 +5902,7 @@ def unblock_threat_ip():
 
 
 @app.route('/api/websites/threats/blocked_ips')
-@login_required
+@admin_required
 def get_blocked_ips():
     """List currently blocked IPs from iptables"""
     try:
@@ -5931,7 +5931,7 @@ def get_blocked_ips():
 
 
 @app.route('/api/storage/info')
-@login_required
+@admin_required
 def storage_info():
     """Info lengkap semua mount point disk"""
     partitions = []
@@ -6033,7 +6033,7 @@ def panel_docker_action():
 # ==========================================
 
 @app.route('/api/webpanel/database')
-@login_required
+@admin_required
 def webpanel_database():
     """Cek status MySQL/MariaDB dan list databases"""
     result = {
@@ -6085,7 +6085,7 @@ def webpanel_database():
 import requests
 
 @app.route('/web_monitor')
-@login_required
+@admin_required
 def web_monitor_page():
     # If no domain is configured, frontend will handle the prompt
     return render_template('web_monitor.html')
@@ -6100,7 +6100,7 @@ def get_web_shield_domain():
     return None
 
 @app.route('/api/web_monitor/config', methods=['GET', 'POST'])
-@login_required
+@admin_required
 def web_monitor_config():
     config_path = os.path.join(DATA_DIR, 'web_shield.json')
     if request.method == 'POST':
@@ -6283,7 +6283,7 @@ def web_monitor_bot_details():
     return jsonify({"bots": blocked_list})
 
 @app.route('/api/web_monitor/security')
-@login_required
+@admin_required
 def web_monitor_security():
     """Cek Failed SSH Logins dari auth.log"""
     auth_log = '/host/root/var/log/auth.log'
@@ -6300,7 +6300,7 @@ def web_monitor_security():
     return jsonify({"failed_logins": failed_logins})
 
 @app.route('/api/web_monitor/backup')
-@login_required
+@admin_required
 def web_monitor_backup():
     """Backup /var/www/{domain} menjadi ZIP"""
     domain = get_web_shield_domain()
@@ -6323,13 +6323,13 @@ def web_monitor_backup():
 
 
 @app.route('/lxd')
-@login_required
+@admin_required
 def lxd_page():
     """Halaman LXD Container Manager"""
     return render_template('lxd.html')
 
 @app.route('/api/lxd/containers')
-@login_required
+@admin_required
 def api_lxd_containers():
     """Daftar semua LXD containers"""
     try:
