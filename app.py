@@ -5260,42 +5260,88 @@ def mobile_backup_auth_required(f):
         }), 401
     return decorated
 
+def normalize_optional_ip(value):
+    """Normalize an optional IPv4/IPv6 address; return None for invalid values."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return ''
+    if not isinstance(value, str):
+        return None
+    try:
+        import ipaddress
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
 def get_mobile_backup_config():
-    """Baca config IP dari file, fallback ke auto-detect dari host network"""
-    # Cek config tersimpan
+    """Read saved IPs or detect addresses on the host network namespace."""
     if os.path.exists(MOBILE_BACKUP_CONFIG_FILE):
         try:
-            with open(MOBILE_BACKUP_CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        except:
+            with open(MOBILE_BACKUP_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+            if isinstance(saved, dict):
+                lan_ip = normalize_optional_ip(saved.get('lan_ip', ''))
+                ts_ip = normalize_optional_ip(saved.get('ts_ip', ''))
+                return {
+                    'lan_ip': lan_ip if lan_ip is not None else '',
+                    'ts_ip': ts_ip if ts_ip is not None else '',
+                }
+        except Exception:
             pass
 
-    # Auto-detect dari /proc/net/fib_trie (host network via /host mount)
-    lan_ip = "192.168.0.158"
-    ts_ip = "100.87.49.14"
+    lan_ip = normalize_optional_ip(os.environ.get('MOBILE_BACKUP_LAN_IP', '')) or ''
+    ts_ip = normalize_optional_ip(os.environ.get('MOBILE_BACKUP_TS_IP', '')) or ''
     try:
-        import subprocess
-        # Baca IP dari host menggunakan proc filesystem
-        result = subprocess.run(['ip', 'addr', 'show'], capture_output=True, text=True, timeout=3)
-        if result.returncode == 0:
+        # Query the host network namespace, not the container's bridge interface.
+        prefix = ['nsenter', '-t', '1', '-n', '--', 'ip']
+        route = subprocess.run(
+            prefix + ['-o', '-4', 'route', 'show', 'default'],
+            capture_output=True, text=True, timeout=3
+        )
+        default_iface = None
+        if route.returncode == 0:
             import re
-            lines = result.stdout.split('\n')
-            current_iface = ''
-            for line in lines:
-                m = re.match(r'\d+: (\S+):', line)
-                if m:
-                    current_iface = m.group(1)
-                addr_m = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', line)
-                if addr_m:
-                    ip = addr_m.group(1)
-                    if ip.startswith('192.168.') or ip.startswith('10.'):
-                        lan_ip = ip
-                    elif ip.startswith('100.'):
-                        ts_ip = ip
-    except:
+            match = re.search(r'\bdev\s+(\S+)', route.stdout)
+            if match:
+                default_iface = match.group(1)
+
+        addresses = subprocess.run(
+            prefix + ['-o', '-4', 'addr', 'show'],
+            capture_output=True, text=True, timeout=3
+        )
+        if addresses.returncode == 0:
+            import ipaddress
+            import re
+            for line in addresses.stdout.splitlines():
+                match = re.match(r'^\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)/', line)
+                if not match:
+                    continue
+                iface = match.group(1).split('@', 1)[0]
+                address = match.group(2)
+                try:
+                    ip_value = ipaddress.ip_address(address)
+                except ValueError:
+                    continue
+                if ip_value.is_loopback or ip_value.is_unspecified or ip_value.is_link_local or ip_value.is_multicast:
+                    continue
+
+                if not ts_ip and (
+                    iface.startswith('tailscale') or iface.startswith(('zt', 'zerotier'))
+                    or ip_value in ipaddress.ip_network('100.64.0.0/10')
+                ):
+                    ts_ip = address
+                elif not lan_ip and default_iface and iface == default_iface:
+                    lan_ip = address
+                elif not lan_ip and not default_iface and ip_value.is_private and not iface.startswith(
+                    ('lo', 'docker', 'br-', 'veth', 'virbr', 'lxdbr', 'tailscale', 'zt')
+                ):
+                    lan_ip = address
+    except Exception:
+        # Do not publish stale example IPs when host detection is unavailable.
         pass
 
-    return {"lan_ip": lan_ip, "ts_ip": ts_ip}
+    return {'lan_ip': lan_ip, 'ts_ip': ts_ip}
+
 
 @app.route('/mobile-backup')
 @login_required
@@ -5313,15 +5359,24 @@ def mobile_backup_get_config():
 @app.route('/api/mobile-backup/config', methods=['POST'])
 @mobile_backup_auth_required
 def mobile_backup_save_config():
-    """Simpan config IP ke file"""
-    data = request.get_json()
-    config = {"lan_ip": data.get('lan_ip', ''), "ts_ip": data.get('ts_ip', '')}
+    """Save validated optional LAN and Tailscale IP addresses."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
+
+    lan_ip = normalize_optional_ip(data.get('lan_ip', ''))
+    ts_ip = normalize_optional_ip(data.get('ts_ip', ''))
+    if lan_ip is None or ts_ip is None:
+        return jsonify({"error": "LAN and Tailscale values must be valid IP addresses or empty"}), 400
+
     try:
-        with open(MOBILE_BACKUP_CONFIG_FILE, 'w') as f:
-            json.dump(config, f)
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(MOBILE_BACKUP_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump({"lan_ip": lan_ip, "ts_ip": ts_ip}, f)
+        return jsonify({"success": True, "lan_ip": lan_ip, "ts_ip": ts_ip})
+    except Exception:
+        return jsonify({"error": "Unable to save mobile backup configuration"}), 500
+
 
 @app.route('/api/mobile-backup/ping', methods=['GET'])
 def mobile_backup_ping():
