@@ -5623,36 +5623,57 @@ def mobile_backup_delete():
 @app.route('/api/mobile-backup/upload', methods=['POST'])
 @mobile_backup_auth_required
 def mobile_backup_upload():
-    """API endpoint untuk menerima file dari aplikasi Android"""
+    """Accept uploads only under MobileBackup, without following destination symlinks."""
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
+
+    uploaded_file = request.files['file']
+    if uploaded_file.filename == '':
         return jsonify({'error': 'Empty filename'}), 400
-        
-    # Ambil folder tujuan jika ada, default ke base
+
     target_dir = request.form.get('path', BACKUP_BASE_DIR)
-    print(f"[MOBILE_BACKUP] Uploading {file.filename} to {target_dir}")
-    
     real_target = os.path.realpath(target_dir)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
-    
     if not is_within_base(real_target, real_base):
         return jsonify({"error": "Akses ditolak"}), 403
-        
-    os.makedirs(real_target, exist_ok=True)
-    safe_name = secure_filename(file.filename)
+    if not os.path.isdir(real_target):
+        return jsonify({"error": "Target folder tidak ditemukan"}), 404
+
+    safe_name = secure_filename(uploaded_file.filename)
     if not safe_name or safe_name in {'.', '..'}:
         return jsonify({'error': 'Invalid filename'}), 400
     save_path = os.path.join(real_target, safe_name)
-    if os.path.exists(save_path):
-        return jsonify({'error': 'File already exists; rename it before uploading'}), 409
+
+    # O_CREAT|O_EXCL atomically fails if any directory entry already exists,
+    # including a dangling symlink. This closes the exists()-then-save() race.
+    fd = None
+    created = False
     try:
-        file.save(save_path)
-        return jsonify({'success': True, 'message': 'File backed up successfully', 'path': save_path})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        fd = os.open(save_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
+        created = True
+        with os.fdopen(fd, 'wb') as destination:
+            fd = None
+            uploaded_file.save(destination)
+        return jsonify({
+            'success': True,
+            'message': 'File backed up successfully',
+            'path': save_path,
+        })
+    except FileExistsError:
+        return jsonify({'error': 'File already exists; rename it before uploading'}), 409
+    except Exception:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if created:
+            try:
+                os.remove(save_path)
+            except OSError:
+                pass
+        return jsonify({'error': 'Unable to save uploaded file'}), 500
+
 
 # ==========================================
 # WEB PANEL INTEGRATION — WEBSITES, STORAGE, DOCKER OVERVIEW
