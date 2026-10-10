@@ -1119,31 +1119,85 @@ import shutil
 def files_page():
     return render_template('files.html')
 
+def configured_readonly_file_roots():
+    """Resolve explicitly configured roots for low-privilege file browsing."""
+    configured = os.environ.get('FILES_READONLY_ROOTS', '')
+    roots = []
+    for raw_root in configured.split(','):
+        raw_root = raw_root.strip()
+        if not raw_root:
+            continue
+        root = os.path.realpath(raw_root)
+        if os.path.isdir(root) and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def file_path_allowed_for_role(path, role=None):
+    """Owner/admin retain host access; other roles need a configured root."""
+    role = role or session.get('role', 'readonly')
+    if role in ('owner', 'admin'):
+        return True
+    if not isinstance(path, str) or not path:
+        return False
+    candidate = os.path.realpath(path)
+    for root in configured_readonly_file_roots():
+        try:
+            if os.path.commonpath([root, candidate]) == root:
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
 @app.route('/api/files/list', methods=['GET'])
 @requires_permission('files', 'read')
 def list_files():
-    path = request.args.get('path', '/')
-    page = int(request.args.get('page', 1))
-    # We can load more items per page now because C is fast!
-    per_page = 50 
+    role = session.get('role', 'readonly')
+    path = request.args.get('path')
+    if role not in ('owner', 'admin'):
+        roots = configured_readonly_file_roots()
+        if not roots:
+            return jsonify({'error': 'Read-only file browsing is disabled until FILES_READONLY_ROOTS is configured'}), 403
+        # The first request opens the first explicitly allowed root instead of /.
+        if not path or path == '/':
+            path = roots[0]
+        elif not file_path_allowed_for_role(path, role):
+            return jsonify({'error': 'Path is outside the read-only file roots'}), 403
+        else:
+            path = os.path.realpath(path)
+    else:
+        path = path or '/'
+
+    try:
+        page = int(request.args.get('page', 1))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid page number'}), 400
+    if page < 1:
+        return jsonify({'error': 'Page number must be positive'}), 400
+    per_page = 50
 
     if not os.path.exists(path):
         return jsonify({'error': 'Path not found'}), 404
-    
+
     try:
-        # Use compiled C binary for Native Speed
         cmd = ["./file_lister", path, str(page), str(per_page)]
         result = subprocess.check_output(cmd, cwd=BASE_DIR).decode('utf-8')
         return Response(result, mimetype='application/json')
     except subprocess.CalledProcessError as e:
         return jsonify({'error': 'C Lister Failed: ' + str(e)}), 500
     except Exception as e:
-        # Fallback to Python if binary fails or permission denied
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/files/drives', methods=['GET'])
 @requires_permission('files', 'read')
 def get_drives():
+    role = session.get('role', 'readonly')
+    if role not in ('owner', 'admin'):
+        return jsonify({'drives': [
+            {'mountpoint': root, 'device': 'configured-shared-root', 'fstype': 'directory'}
+            for root in configured_readonly_file_roots()
+        ]})
     drives = []
     try:
         import psutil
@@ -1242,11 +1296,18 @@ def file_content():
             return jsonify({'error': str(e)}), 500
             
     # GET
+    if not path:
+        return jsonify({'error': 'File path is required'}), 400
+    role = session.get('role', 'readonly')
+    if role not in ('owner', 'admin'):
+        if not file_path_allowed_for_role(path, role):
+            return jsonify({'error': 'File is outside the read-only file roots'}), 403
+        path = os.path.realpath(path)
     if not os.path.exists(path):
         return jsonify({'error': 'File not found'}), 404
-        
+
     try:
-        with open(path, 'r', encoding='utf-8') as f: # Simple text reading
+        with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
             return jsonify({'content': content})
     except UnicodeDecodeError:
@@ -5058,11 +5119,18 @@ def files_download_endpoint():
     """Download file"""
     try:
         path = request.args.get('path')
-        if not path or not os.path.exists(path):
+        if not path:
+            return jsonify({'error': 'File path is required'}), 400
+        role = session.get('role', 'readonly')
+        if role not in ('owner', 'admin'):
+            if not file_path_allowed_for_role(path, role):
+                return jsonify({'error': 'File is outside the read-only file roots'}), 403
+            path = os.path.realpath(path)
+        if not os.path.exists(path):
             return jsonify({'error': 'File not found'}), 404
         if os.path.isdir(path):
             return jsonify({'error': 'Cannot download directory'}), 400
-            
+
         from flask import send_file
         return send_file(path, as_attachment=True)
     except Exception as e:
