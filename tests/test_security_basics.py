@@ -560,6 +560,9 @@ class HostCommandSafetyTests(unittest.TestCase):
         self.assertIsInstance(args[0], list)
         self.assertFalse(kwargs.get("shell", False))
         self.assertIn("cd '/tmp/install ; touch /tmp/nope' &&", args[0][-1])
+        self.assertIn("if docker compose version", args[0][-1])
+        self.assertIn("elif command -v docker-compose", args[0][-1])
+        self.assertIn("docker-compose up --build -d", args[0][-1])
         self.assertEqual(args[0][-3:], ["sh", "-c", args[0][-1]])
 
     def test_update_rejects_null_byte_in_working_directory(self):
