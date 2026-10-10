@@ -23,8 +23,12 @@ services:
       - HOST_PROC=/host/proc
       - HOST_SYS=/host/sys
       - HOST_ROOT=/host/root
-      # Secret must be supplied through an untracked .env file or the host environment.
+      # Secrets belong in the untracked .env file, never in this YAML.
+      - SECRET_KEY=${SECRET_KEY:-}
       - MOBILE_ACCESS_TOKEN=${MOBILE_ACCESS_TOKEN:-}
+      - DASHBOARD_ALLOWED_ORIGINS=${DASHBOARD_ALLOWED_ORIGINS:-}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-0}
+      - SESSION_COOKIE_SAMESITE=${SESSION_COOKIE_SAMESITE:-Lax}
     logging:
       driver: "json-file"
       options:
