@@ -11,6 +11,7 @@ import os
 import select
 import struct
 import hashlib
+import hmac
 import json
 from datetime import datetime
 import requests
@@ -385,10 +386,8 @@ def login_required(f):
             session['role'] = 'admin'
             return f(*args, **kwargs)
 
-        # 2. Mobile App Bypass (Fix SameSite Cookie Issues)
-        if request.headers.get('X-Mobile-Key') == 'EkaBackupSync_2024_Secret':
-            return f(*args, **kwargs)
-            
+        # Mobile API access is scoped to the mobile-backup routes. Never use a
+        # hard-coded request header to bypass authentication for every route.
         # 2. Check Session
         if session.get('logged_in'):
             # Check timeout
@@ -1155,14 +1154,21 @@ def file_action():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/files/content', methods=['GET', 'POST'])
+@requires_permission('files', 'read')
 def file_content():
     path = request.args.get('path')
     if request.method == 'POST':
-        data = request.json
+        # Reading is available to file-read roles; writing requires full file
+        # permission. Do not trust the frontend to enforce this distinction.
+        if not has_permission(session.get('role'), 'files', 'full'):
+            return jsonify({'error': 'Write permission required'}), 403
+        data = request.get_json(silent=True) or {}
         path = data.get('path')
         content = data.get('content')
+        if not isinstance(path, str) or not path or not isinstance(content, str):
+            return jsonify({'error': 'Invalid path or content'}), 400
         try:
-            with open(path, 'w') as f:
+            with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return jsonify({'success': True})
         except Exception as e:
@@ -1297,6 +1303,7 @@ def docker_page():
     return render_template('docker.html')
 
 @app.route('/api/docker/containers')
+@requires_permission('docker', 'view')
 def docker_containers():
     try:
         client = docker_sdk.from_env()
@@ -1364,6 +1371,7 @@ def docker_containers():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/docker/<container_id>/stats')
+@requires_permission('docker', 'view')
 def docker_container_stats(container_id):
     """Fetch stats for a single container - called separately to not block"""
     try:
@@ -4865,6 +4873,49 @@ def files_download_endpoint():
 MOBILE_BACKUP_CONFIG_FILE = os.path.join(DATA_DIR, 'mobile_backup_config.json')
 BACKUP_BASE_DIR = '/host/root/mnt/data/MobileBackup'  # /host/root = / di host, lalu /mnt/data/MobileBackup
 
+def is_within_base(path, base):
+    """Return True only when the resolved path is within the intended base.
+
+    commonpath avoids the prefix bug where /some/base-evil would pass a
+    simple startswith('/some/base') check.
+    """
+    try:
+        real_path = os.path.realpath(path)
+        real_base = os.path.realpath(base)
+        return os.path.commonpath([real_base, real_path]) == real_base
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def mobile_backup_auth_required(f):
+    """Allow a dashboard session or a configured token on mobile-backup APIs.
+
+    The token is scoped only to these endpoints, never used as a global
+    authentication bypass. Configure MOBILE_ACCESS_TOKEN in the environment.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        configured_token = os.environ.get('MOBILE_ACCESS_TOKEN', '').strip()
+        supplied_token = request.headers.get('X-Mobile-Key', '')
+        if configured_token and supplied_token and hmac.compare_digest(
+            supplied_token, configured_token
+        ):
+            return f(*args, **kwargs)
+
+        if session.get('logged_in'):
+            config = load_security_config()
+            last_active = session.get('last_active', session.get('login_time', time.time()))
+            timeout = config.get('session_timeout', 3600)
+            if time.time() - last_active <= timeout:
+                session['last_active'] = time.time()
+                return f(*args, **kwargs)
+            session.clear()
+
+        return jsonify({
+            'error': 'Mobile backup authentication required. Set MOBILE_ACCESS_TOKEN or sign in.'
+        }), 401
+    return decorated
+
 def get_mobile_backup_config():
     """Baca config IP dari file, fallback ke auto-detect dari host network"""
     # Cek config tersimpan
@@ -4910,13 +4961,13 @@ def mobile_backup_page():
     return render_template('mobile_backup.html', lan_ip=config['lan_ip'], ts_ip=config['ts_ip'])
 
 @app.route('/api/mobile-backup/config', methods=['GET'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_get_config():
     """Ambil config IP"""
     return jsonify(get_mobile_backup_config())
 
 @app.route('/api/mobile-backup/config', methods=['POST'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_save_config():
     """Simpan config IP ke file"""
     data = request.get_json()
@@ -4934,7 +4985,7 @@ def mobile_backup_ping():
     return jsonify({"server": "EkaDashboard", "status": "online", "version": "1.0"})
 
 @app.route('/api/mobile-backup/disk-usage', methods=['GET'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_disk_usage():
     """Informasi penggunaan disk HDD"""
     try:
@@ -4961,7 +5012,7 @@ def mobile_backup_disk_usage():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mobile-backup/mkdir', methods=['POST'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_mkdir():
     """Buat folder baru"""
     data = request.get_json()
@@ -4971,7 +5022,7 @@ def mobile_backup_mkdir():
         return jsonify({"error": "Nama folder tidak valid"}), 400
     real_parent = os.path.realpath(parent)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
-    if not real_parent.startswith(real_base):
+    if not is_within_base(real_parent, real_base):
         return jsonify({"error": "Akses ditolak"}), 403
     new_dir = os.path.join(parent, name)
     try:
@@ -4981,7 +5032,7 @@ def mobile_backup_mkdir():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mobile-backup/rename', methods=['POST'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_rename():
     """Rename file atau folder"""
     data = request.get_json()
@@ -4991,7 +5042,7 @@ def mobile_backup_rename():
         return jsonify({"error": "Nama tidak valid"}), 400
     real_old = os.path.realpath(old_path)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
-    if not real_old.startswith(real_base):
+    if not is_within_base(real_old, real_base) or real_old == real_base:
         return jsonify({"error": "Akses ditolak"}), 403
     new_path = os.path.join(os.path.dirname(old_path), new_name)
     try:
@@ -5013,7 +5064,7 @@ def mobile_backup_move():
     real_dest_dir = os.path.realpath(dest_dir)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
     
-    if not real_src.startswith(real_base) or not real_dest_dir.startswith(real_base):
+    if (not is_within_base(real_src, real_base) or real_src == real_base\n            or not is_within_base(real_dest_dir, real_base)):
         return jsonify({"error": "Akses ditolak"}), 403
         
     try:
@@ -5052,13 +5103,13 @@ def mobile_backup_copy():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mobile-backup/download-file', methods=['GET'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_download_file():
     """Download file backup"""
     path = request.args.get('path', '')
     real_path = os.path.realpath(path)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
-    if not real_path.startswith(real_base):
+    if not is_within_base(real_path, real_base) or real_path == real_base:
         return jsonify({"error": "Akses ditolak"}), 403
     if not os.path.isfile(real_path):
         return jsonify({"error": "File tidak ditemukan"}), 404
@@ -5066,7 +5117,7 @@ def mobile_backup_download_file():
     return send_file(real_path, as_attachment=True)
 
 @app.route('/api/mobile-backup/files', methods=['GET'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_list_files():
     """List semua file dan folder di direktori backup HDD"""
     try:
@@ -5102,7 +5153,7 @@ def mobile_backup_list_files():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mobile-backup/delete', methods=['POST'])
-@login_required
+@mobile_backup_auth_required
 def mobile_backup_delete():
     """Hapus file backup"""
     data = request.get_json()
@@ -5138,11 +5189,16 @@ def mobile_backup_upload():
     real_target = os.path.realpath(target_dir)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
     
-    if not real_target.startswith(real_base):
+    if not is_within_base(real_target, real_base):
         return jsonify({"error": "Akses ditolak"}), 403
         
     os.makedirs(target_dir, exist_ok=True)
-    save_path = os.path.join(target_dir, file.filename)
+    safe_name = secure_filename(file.filename)
+    if not safe_name or safe_name in {'.', '..'}:
+        return jsonify({'error': 'Invalid filename'}), 400
+    save_path = os.path.join(real_target, safe_name)
+    if os.path.exists(save_path):
+        return jsonify({'error': 'File already exists; rename it before uploading'}), 409
     try:
         file.save(save_path)
         return jsonify({'success': True, 'message': 'File backed up successfully', 'path': save_path})
@@ -5935,7 +5991,7 @@ def api_lxd_containers():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/lxd/action', methods=['POST'])
-@login_required
+@admin_required
 def api_lxd_action():
     """Start/Stop/Restart/Delete LXD container"""
     data = request.json
@@ -5959,7 +6015,7 @@ def api_lxd_action():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/lxd/create', methods=['POST'])
-@login_required
+@admin_required
 def api_lxd_create():
     """Create LXD container"""
     data = request.json
@@ -5980,7 +6036,7 @@ def api_lxd_create():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/lxd/config', methods=['POST'])
-@login_required
+@admin_required
 def api_lxd_config():
     """Set LXD container resource limits (CPU, RAM, Storage)"""
     data = request.json
@@ -6015,4 +6071,7 @@ def api_lxd_config():
 
 if __name__ == '__main__':
     print("Starting Development Server on http://localhost:5000")
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+    # Debugger is disabled by default; only enable explicitly in a trusted
+    # development environment.
+    debug_enabled = os.environ.get('FLASK_DEBUG', '0') == '1'
+    socketio.run(app, debug=debug_enabled, host='0.0.0.0', port=5000)
