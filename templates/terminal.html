@@ -808,7 +808,7 @@ Restart App=systemctl restart myapp"></textarea>
             });
 
             // Store
-            terminals[sessionId] = { term, fitAddon, path, name: tabName };
+            terminals[sessionId] = { term, fitAddon, path, name: tabName, resizeObserver };
 
             // Start terminal on server
             socket.emit('start_terminal', {
@@ -850,6 +850,7 @@ Restart App=systemctl restart myapp"></textarea>
             document.getElementById('term-wrap-' + sessionId)?.remove();
 
             if (terminals[sessionId]) {
+                terminals[sessionId].resizeObserver?.disconnect();
                 terminals[sessionId].term.dispose();
                 delete terminals[sessionId];
             }
