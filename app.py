@@ -2197,31 +2197,67 @@ def services_status():
 @app.route('/api/services/control', methods=['POST'])
 @requires_permission('services', 'limited')
 def service_control():
-    """Start/Stop/Restart a service"""
-    data = request.json
+    """Control only explicitly configured systemd services with role-specific actions."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'A JSON object is required'}), 400
+
     service_id = data.get('service')
-    action = data.get('action') # start, stop, restart
-    
+    action = data.get('action')
+    if action not in ('start', 'stop', 'restart'):
+        return jsonify({'error': 'Invalid action'}), 400
+
+    # Operators may restart explicitly allowlisted services only.
+    role = session.get('role', 'readonly')
+    if role == 'operator' and action != 'restart':
+        return jsonify({'error': 'Operators may only restart configured services'}), 403
+    if role not in ('owner', 'admin', 'operator'):
+        return jsonify({'error': 'Insufficient role for service control'}), 403
+
     settings = load_app_settings()
     services_config = settings.get('services', [])
-    
-    # Validate if legitimate service
-    valid_ids = [s.get('id') for s in services_config]
-    
-    if service_id not in valid_ids:
-        # Allow admin to control any service technically, but safest to restrict
-        # For flexibility, let's allow it but log it warningly if not in list
-        pass 
+    if not isinstance(services_config, list):
+        return jsonify({'error': 'Service allowlist is misconfigured'}), 500
 
-    if action not in ['start', 'stop', 'restart']:
-        return jsonify({'error': 'Invalid action'}), 400
-        
+    valid_ids = {
+        item.get('id') for item in services_config
+        if isinstance(item, dict) and isinstance(item.get('id'), str)
+    }
+    allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.@:-')
+    if (
+        not isinstance(service_id, str)
+        or not service_id
+        or not service_id[0].isascii()
+        or not service_id[0].isalnum()
+        or any(char not in allowed_chars for char in service_id)
+        or service_id not in valid_ids
+    ):
+        return jsonify({'error': 'Service is not in the configured allowlist'}), 400
+
     try:
-        run_host_command(['systemctl', action, service_id])
-        audit_log('SERVICE_CONTROL', f"{action.title()} service {service_id}", session.get('username'))
+        result = run_host_command(['systemctl', action, service_id])
+        if getattr(result, 'returncode', 1) != 0:
+            audit_log(
+                'SERVICE_CONTROL_FAILED',
+                f"{action.title()} service {service_id} failed",
+                session.get('username')
+            )
+            return jsonify({'error': 'Service command failed'}), 502
+
+        audit_log(
+            'SERVICE_CONTROL',
+            f"{action.title()} service {service_id}",
+            session.get('username')
+        )
         return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        audit_log(
+            'SERVICE_CONTROL_ERROR',
+            f"{action.title()} service {service_id} raised an exception",
+            session.get('username')
+        )
+        return jsonify({'error': 'Unable to control service'}), 500
+
 
 @app.route('/api/services/discover')
 @requires_permission('services', 'view')
