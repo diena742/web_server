@@ -1,267 +1,126 @@
 # Panduan Instalasi Eka Dashboard
 
-Selamat datang di panduan instalasi **Eka Dashboard**. Panduan ini akan membantu Anda memasang dan menjalankan dashboard pada server atau mesin target Anda (STB, Mini PC, VPS, atau Local Server) yang berbasis sistem operasi Linux.
+Panduan ini menjelaskan instalasi dan konfigurasi dasar Eka Dashboard pada Linux (Ubuntu, Debian, Armbian, STB, Mini PC, VPS, atau server lokal).
 
----
+> Jalankan installer hanya setelah meninjau perubahan sistem yang akan dilakukan. Installer versi branch ini tidak lagi memindahkan port CasaOS, mematikan layanan host, menghapus container secara paksa, atau menghapus konfigurasi keamanan secara otomatis.
 
-## 1. Persiapan Sistem
-Sebelum memulai instalasi, pastikan Anda telah menyiapkan hal-hal berikut:
-1. **Perangkat Target**: PC/Laptop/Mini PC/STB dengan OS Linux (Ubuntu, Debian, Armbian, atau OpenWRT dengan fitur Docker).
-2. **Akses Terminal/SSH**: Aplikasi seperti PuTTY, PowerShell, atau Terminal bawaan untuk mengakses server Anda.
-3. **Koneksi Internet**: Diperlukan untuk mengunduh *dependencies* dan image Docker.
+## 1. Persiapan
 
----
+Siapkan akses shell/SSH, koneksi internet, dan Docker. Installer dapat menawarkan instalasi Docker jika belum tersedia. Pastikan Anda mempunyai backup sebelum memperbarui instalasi yang sudah dipakai.
 
-## 2. Proses Instalasi (Otomatis)
+## 2. Instalasi
 
-Dashboard ini dilengkapi dengan *script installer* otomatis (`install.sh`) yang akan mengonfigurasi Docker, memetakan port, dan menjalankan container secara praktis.
+### Pilihan A — Git clone
 
-### Pilihan A: Instalasi via Git Clone (Rekomendasi)
-Jika server Anda sudah terpasang `git`, Anda dapat langsung mengkloning repositori ini:
-
-```bash
-# 1. Update sistem dan install git
-sudo apt-get update && sudo apt-get install -y git
-
-# 2. Clone repositori Eka Dashboard
-git clone https://github.com/ekahr11/web_server.git eka_dashboard
-
-# 3. Masuk ke direktori
+\`\`\`bash
+sudo apt-get update
+sudo apt-get install -y git
+git clone https://github.com/recode-project/web_server.git eka_dashboard
 cd eka_dashboard
-
-# 4. Eksekusi Script Instalasi
 sudo bash install.sh
-```
+\`\`\`
 
-### Pilihan B: Instalasi via File ZIP
-Jika Anda memiliki file `.zip` (misalnya `eka_dashboard_retail.zip`):
-1. **Upload** file `.zip` tersebut ke server Anda (menggunakan SCP, WinSCP, atau FTP).
-   ```bash
-   scp eka_dashboard_retail.zip root@IP_SERVER_ANDA:/root/
-   ```
-2. **Ekstrak dan Install** melalui SSH:
-   ```bash
-   # Install unzip jika belum ada
-   sudo apt-get update && sudo apt-get install -y unzip
-   
-   # Ekstrak file
-   unzip eka_dashboard_retail.zip -d eka_dashboard
-   
-   # Masuk ke folder & Install
-   cd eka_dashboard
-   sudo bash install.sh
-   ```
+### Pilihan B — ZIP
 
----
+Ekstrak arsip ke direktori kerja, masuk ke direktori tersebut, lalu jalankan:
 
-## 3. Apa yang Dilakukan Script Installer?
-Saat Anda menjalankan `sudo bash install.sh`, sistem akan melakukan beberapa hal:
-- Mengecek dan memasang **Docker** (serta Docker Compose) secara otomatis jika belum ada.
-- Memeriksa ketersediaan port dashboard tanpa menghentikan proses host atau mengubah konfigurasi CasaOS secara otomatis.
-- Membangun dan menjalankan *container* Eka Dashboard secara otomatis.
+\`\`\`bash
+sudo bash install.sh
+\`\`\`
 
-### Konfigurasi Port dan CasaOS
+Installer menyalin file aplikasi ke \`/root/eka_dashboard\` tanpa menyalin folder \`data/\` atau file \`.env\` dari direktori sumber. Di direktori instalasi, \`data/\` dan \`.env\` dipertahankan selama pembaruan.
 
-Secara default dashboard memakai port host `80`. Jika port tersebut telah digunakan CasaOS, Nginx, Apache, atau aplikasi lain, tentukan port kosong pada file `.env` di direktori proyek sebelum menjalankan installer:
+## 3. Port dan CasaOS
 
-```bash
+Secara default dashboard memakai port host \`80\` dan port container \`5000\`. Installer tidak mengubah port CasaOS atau menghentikan layanan lain. Jika port 80 sedang dipakai, pilih port kosong di file \`.env\` **sebelum** instalasi:
+
+\`\`\`bash
+cd eka_dashboard
 printf 'DASHBOARD_PORT=8080\n' >> .env
 sudo bash install.sh
-```
+\`\`\`
 
-Kemudian akses dashboard melalui `http://IP-SERVER:8080`. Installer tidak lagi mengubah port CasaOS, menonaktifkan web server, atau mematikan proses lain secara otomatis.
+Akses dashboard dengan \`http://IP-SERVER:8080\`. Jika sudah terpasang, ubah \`DASHBOARD_PORT\` di \`/root/eka_dashboard/.env\`, lalu jalankan:
 
-Jika instalasi sukses, Anda akan melihat pesan seperti:
-> **INSTALASI SUKSES!**  
-> Silakan akses Dashboard Admin di: `http://<IP_SERVER_ANDA>`
+\`\`\`bash
+cd /root/eka_dashboard
+sudo docker compose up -d
+\`\`\`
 
----
+Jika port tetap bentrok, pilih port yang tidak digunakan. Jangan menghentikan proses host yang tidak dikenal hanya untuk membebaskan port.
 
-## 4. Login Pertama (Setup Wizard)
-1. **Akses Dashboard**: Buka *browser* pada perangkat apa saja yang terhubung di jaringan yang sama, lalu masukkan IP Server Anda (misal `http://192.168.1.10`).
-2. **Setup Wizard**: Pada akses pertama, Anda akan diarahkan ke halaman Setup Wizard.
-3. **Buat Password**: Masukkan dan buat **Password Admin** baru yang akan digunakan untuk mengelola dashboard Anda ke depannya.
-4. **Login**: Setelah password berhasil dibuat, masuk (login) menggunakan sandi tersebut. Dashboard Anda kini sudah siap digunakan!
+## 4. Login awal
 
----
+Buka dashboard dari jaringan tepercaya. Pada instalasi baru, wizard meminta Anda membuat akun owner. Gunakan password sekurang-kurangnya 12 karakter. Jangan membiarkan dashboard yang belum dikonfigurasi terbuka ke jaringan publik.
 
-## 5. Token autentikasi aplikasi Mobile Backup
+## 5. Secret, token mobile, dan origin browser
 
-Endpoint Mobile Backup sekarang tidak lagi memakai header rahasia yang tertanam di source sebagai bypass login global. Untuk penggunaan aplikasi Android, buat token khusus dan simpan hanya pada server:
+### Secret sesi
 
-```bash
+Installer membuat \`SECRET_KEY\` acak dan menyimpannya di file \`.env\` agar sesi tetap valid setelah container diperbarui. Jangan menghapus, mengunggah, atau memasukkan \`.env\` ke commit. File tersebut dicakup oleh \`.gitignore\`.
+
+Jika menjalankan Compose secara manual tanpa installer, buat secret yang persisten satu kali:
+
+\`\`\`bash
 cd /root/eka_dashboard
 umask 077
 touch .env
-if ! grep -Eq '^SECRET_KEY=.{1,}
-printf 'Simpan token ini di konfigurasi aplikasi Android: %s\n' "$TOKEN"
-sudo docker compose up -d --build
-```
-
-Simpan token tersebut di konfigurasi header aplikasi Android sebagai `X-Mobile-Key`. Jangan menaruh nilai token pada source code, commit, screenshot publik, atau laporan bug. Jika aplikasi Android belum dapat mengganti header token, gunakan login dashboard berbasis cookie atau perbarui konfigurasi klien terlebih dahulu.
-
-File `.env` sudah dicakup oleh `.gitignore`; tetap verifikasi sebelum commit:
-```bash
-git status --short
-```
-
-Token ini hanya berlaku untuk API `/api/mobile-backup/*`, bukan untuk melewati autentikasi pada endpoint dashboard, file manager, Docker, LXD, atau terminal.
-
-### CORS dan cookie sesi
-
-Secara default UI dan Socket.IO dibatasi ke origin yang sama dengan dashboard. Jika memang menggunakan frontend dari origin lain, tambahkan origin lengkap ke `DASHBOARD_ALLOWED_ORIGINS` pada `.env`, dipisahkan koma, misalnya `https://dashboard.example.com`. Jangan gunakan wildcard untuk origin yang membawa cookie sesi. Di deployment HTTPS, atur `SESSION_COOKIE_SECURE=1`; nilai default `0` hanya diperlukan saat mengakses dashboard melalui HTTP di LAN.
-
----
-
-## 6. FAQ & Troubleshooting (Kendala & Solusi)
-
-Berikut adalah 15 daftar kendala yang sering terjadi beserta solusinya:
-
-**1. Server menggunakan CasaOS, apakah akan bermasalah?**
-Installer tidak mengubah port CasaOS. Jika CasaOS memakai port 80, atur `DASHBOARD_PORT=8080` pada file `.env`, lalu jalankan installer dan buka dashboard di `http://IP-SERVER:8080`.
-
-**2. Bagaimana cara mengganti Port Eka Dashboard agar tidak menggunakan Port 80?**
-1. Masuk ke direktori instalasi: `cd /root/eka_dashboard`
-2. Tambahkan konfigurasi port ke file `.env`: `printf 'DASHBOARD_PORT=8080\\n' >> .env`
-3. Terapkan: `sudo docker compose up -d`
-4. Akses di: `http://IP-SERVER:8080`
-
-Pastikan port yang dipilih belum digunakan proses lain.
-
-**3. Saya lupa Password Admin, bagaimana cara meresetnya?**
-Jangan menghapus `data/security_config.json` pada server yang masih terjangkau jaringan. Penghapusan file tersebut mengaktifkan kembali setup awal dan dapat memungkinkan pengguna lain mengambil alih akun owner. Gunakan pemulihan melalui akses shell/console tepercaya dan siapkan backup konfigurasi sebelum melakukan perubahan. Jika dashboard masih berjalan, reset hash password utama melalui Python di dalam container:
-
-```bash
-cd /root/eka_dashboard
-sudo docker exec -it eka_dashboard python -c 'import getpass, app; cfg=app.load_security_config(); pw=getpass.getpass("Password baru (min. 12 karakter): "); assert len(pw) >= 12, "Password terlalu pendek"; cfg["password_hash"]=app.create_password_hash(pw); app.save_security_config(cfg); print("Password owner diperbarui.")'
-```
-
-Perintah ini hanya memperbarui hash password akun utama dan mempertahankan konfigurasi pengguna lainnya. Jalankan hanya dari shell server yang tepercaya.
-
-**4. Error "Permission denied" saat menjalankan script `install.sh`.**
-Anda membutuhkan hak eksekusi. Ketik perintah `chmod +x install.sh` lalu jalankan kembali menggunakan `sudo bash install.sh`.
-
-**5. Error "docker-compose: command not found".**
-Pada versi Docker terbaru, gunakan perintah `docker compose` (menggunakan spasi, tanpa tanda hubung). Pastikan plugin Docker Compose sudah terpasang di sistem.
-
-**6. Error "port is already allocated" saat proses instalasi (selain CasaOS).**
-Artinya port 80 sedang dipakai oleh aplikasi lain (seperti Apache atau Nginx bawaan). Matikan aplikasi tersebut dengan `sudo systemctl stop apache2` atau `sudo systemctl stop nginx`, atau ganti port Eka Dashboard (lihat poin 2).
-
-**7. Dashboard tidak bisa dibuka (timeout) dari PC / HP lain.**
-Pastikan perangkat terhubung di jaringan (WiFi/LAN) yang sama dengan server. Pastikan juga IP Address yang dimasukkan benar. Jika menggunakan Ubuntu/Debian, pastikan *firewall* tidak memblokir port 80 dengan menjalankan `sudo ufw allow 80`.
-
-**8. Error "unzip: command not found" saat mencoba mengekstrak file installer.**
-Sistem Anda belum memiliki aplikasi unzip. Instal terlebih dahulu dengan mengetik `sudo apt-get update && sudo apt-get install -y unzip`.
-
-**9. Tampilan Dashboard *blank* putih atau berantakan.**
-Masalah ini umumnya disebabkan oleh *cache* browser yang nyangkut. Tekan tombol **Ctrl + F5** (di Windows) atau **Cmd + Shift + R** (di Mac) pada halaman dashboard untuk melakukan *Hard Reload*.
-
-**10. Muncul pesan error "502 Bad Gateway".**
-Artinya *container* web server sudah berjalan, namun aplikasi di dalamnya masih proses *booting* atau mengalami *crash*. Tunggu sekitar 10-15 detik dan *refresh* halaman. Jika masih error, cek log sistem.
-
-**11. Bagaimana cara melihat pesan error lengkap (Log Sistem)?**
-Masuk ke direktori instalasi (`cd /root/eka_dashboard`) dan ketik `sudo docker compose logs -f`. Di situ Anda bisa melihat aktivitas sistem atau peringatan error secara *real-time*. Tekan Ctrl+C untuk keluar.
-
-**12. Bagaimana cara mematikan sementara (stop) Eka Dashboard?**
-Masuk ke direktori instalasi, lalu eksekusi perintah `sudo docker compose down`. Untuk menyalakannya kembali, jalankan `sudo docker compose up -d`.
-
-**13. Bagaimana cara memperbarui (Update) Eka Dashboard ke versi terbaru?**
-Jika Anda menginstal menggunakan metode Git Clone, ketik perintah berikut di direktori instalasi:
-```bash
-git pull
-sudo docker compose up -d --build
-```
-Sistem akan otomatis mengunduh kode terbaru dan melakukan *build* ulang tanpa menghilangkan data pengaturan.
-
-**14. Dashboard berjalan sangat lambat atau sering macet.**
-Hal ini bisa terjadi jika memori (RAM) server penuh. Gunakan perintah `htop` untuk mengecek status penggunaan CPU dan RAM. Jika RAM sangat minim (< 1GB), disarankan untuk menambahkan *Swap Memory* di Linux Anda minimal 1GB - 2GB.
-
-**15. Error "permission denied while trying to connect to the Docker daemon socket".**
-Anda tidak memiliki izin akses ke layanan Docker. Pastikan Anda menambahkan awalan `sudo` di setiap perintah docker, atau masukkan user Anda ke grup docker dengan perintah `sudo usermod -aG docker $USER` lalu relogin.
- .env; then
+if ! grep -Eq '^SECRET_KEY=.+$' .env; then
     sed -i '/^SECRET_KEY=/d' .env
     printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
 fi
+chmod 600 .env
+\`\`\`
+
+### Aplikasi Android Mobile Backup (opsional)
+
+API Mobile Backup menerima sesi dashboard atau token khusus dari environment \`MOBILE_ACCESS_TOKEN\`. Token ini hanya berlaku untuk rute \`/api/mobile-backup/*\`; tidak ada lagi header rahasia yang melewati autentikasi global.
+
+Untuk membuat token, jalankan di server dan simpan nilainya hanya di konfigurasi privat aplikasi Android:
+
+\`\`\`bash
+cd /root/eka_dashboard
+umask 077
+touch .env
+sed -i '/^SECRET_KEY=/d' .env
+printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
 sed -i '/^MOBILE_ACCESS_TOKEN=/d' .env
 TOKEN="$(openssl rand -hex 32)"
 printf 'MOBILE_ACCESS_TOKEN=%s\n' "$TOKEN" >> .env
 chmod 600 .env
-printf 'Simpan token ini di konfigurasi aplikasi Android: %s\n' "$TOKEN"
+printf 'Atur header X-Mobile-Key aplikasi Android menjadi: %s\n' "$TOKEN"
 sudo docker compose up -d --build
-```
+\`\`\`
 
-Simpan token tersebut di konfigurasi header aplikasi Android sebagai `X-Mobile-Key`. Jangan menaruh nilai token pada source code, commit, screenshot publik, atau laporan bug. Jika aplikasi Android belum dapat mengganti header token, gunakan login dashboard berbasis cookie atau perbarui konfigurasi klien terlebih dahulu.
+Perintah ini mengganti secret sesi, sehingga semua sesi browser yang sudah aktif akan diminta login kembali. Jika Anda hanya perlu membuat token mobile dan telah memiliki \`SECRET_KEY\` yang benar, jangan menghapus atau menggantinya; hapus hanya baris \`MOBILE_ACCESS_TOKEN\` lama sebelum membuat token baru.
 
-File `.env` sudah dicakup oleh `.gitignore`; tetap verifikasi sebelum commit:
-```bash
-git status --short
-```
+Jangan masukkan nilai secret atau token ke source code, commit Git, screenshot, issue, atau Pull Request.
 
-Token ini hanya berlaku untuk API `/api/mobile-backup/*`, bukan untuk melewati autentikasi pada endpoint dashboard, file manager, Docker, LXD, atau terminal.
+### CORS dan cookie sesi
+
+Secara default UI dan Socket.IO hanya menerima origin yang sama dengan dashboard. Jika memang memakai frontend browser dari origin lain, set \`DASHBOARD_ALLOWED_ORIGINS\` di \`.env\` sebagai daftar origin lengkap dipisahkan koma, misalnya \`https://dashboard.example.com\`. Jangan memakai wildcard untuk origin yang membawa cookie sesi. Jika dashboard diakses melalui HTTPS, set \`SESSION_COOKIE_SECURE=1\`; nilai default \`0\` dipakai saat akses langsung melalui HTTP di LAN.
+
+## 6. FAQ dan pemecahan masalah
+
+**Port sudah digunakan.** Atur \`DASHBOARD_PORT=8080\` (atau port kosong lain) di file \`.env\`; installer tidak akan menghentikan proses yang memakai port tersebut.
+
+**Dashboard tidak dapat dibuka.** Pastikan container aktif dengan \`sudo docker compose ps\`, periksa log dengan \`sudo docker compose logs --tail=200\`, lalu pastikan firewall mengizinkan port yang dipilih.
+
+**Bagaimana memperbarui aplikasi?** Masuk ke direktori instalasi dan jalankan \`sudo bash install.sh\` dari salinan source yang akan dipakai. Installer mempertahankan folder \`data/\`, file \`.env\`, dan konfigurasi keamanan. Buat backup sebelum upgrade.
+
+**Bagaimana mengganti password owner yang terlupa?** Jangan menghapus \`data/security_config.json\` pada server yang dapat dijangkau jaringan; tindakan itu mengaktifkan wizard setup kembali dan berisiko memberi orang lain kesempatan mengambil alih akun. Gunakan console tepercaya di server untuk memperbarui hash password utama saat container berjalan:
+
+\`\`\`bash
+cd /root/eka_dashboard
+sudo docker exec -it eka_dashboard python -c 'import getpass, app; cfg=app.load_security_config(); pw=getpass.getpass("Password baru (min. 12 karakter): "); assert len(pw) >= 12, "Password terlalu pendek"; cfg["password_hash"]=app.create_password_hash(pw); app.save_security_config(cfg); print("Password owner diperbarui.")'
+\`\`\`
+
+Perintah itu mengubah hash password utama dan mempertahankan konfigurasi pengguna lain. Jalankan hanya dari shell tepercaya.
+
+**Bagaimana memeriksa log?** Gunakan \`sudo docker compose logs -f\`; tekan \`Ctrl+C\` untuk keluar tanpa menghentikan container.
+
+**Bagaimana menghentikan dashboard?** Gunakan \`sudo docker compose stop\`. Gunakan \`sudo docker compose up -d\` untuk menyalakannya kembali. Perintah \`down\` menghapus container dan network Compose, tetapi tidak menghapus bind-mounted \`data/\` atau \`.env\`.
 
 ---
 
-## 6. FAQ & Troubleshooting (Kendala & Solusi)
-
-Berikut adalah 15 daftar kendala yang sering terjadi beserta solusinya:
-
-**1. Server menggunakan CasaOS, apakah akan bermasalah?**
-Installer tidak mengubah port CasaOS. Jika CasaOS memakai port 80, atur `DASHBOARD_PORT=8080` pada file `.env`, lalu jalankan installer dan buka dashboard di `http://IP-SERVER:8080`.
-
-**2. Bagaimana cara mengganti Port Eka Dashboard agar tidak menggunakan Port 80?**
-1. Masuk ke direktori instalasi: `cd /root/eka_dashboard`
-2. Buka file konfigurasi: `nano docker-compose.yml`
-3. Ubah bagian `ports:` dari `- "80:5000"` menjadi `- "8080:5000"` (atau port lain).
-4. Simpan perubahan (Ctrl+X, ketik Y, lalu Enter).
-5. Terapkan: `sudo docker compose up -d`
-6. Akses di: `http://IP-SERVER:8080`
-
-**3. Saya lupa Password Admin, bagaimana cara me-resetnya?**
-Hapus file konfigurasi keamanan lalu *restart container*:
-```bash
-cd /root/eka_dashboard
-sudo rm data/security_config.json
-sudo docker compose restart
-```
-Buka kembali dashboard, Anda akan diminta membuat *password* baru.
-
-**4. Error "Permission denied" saat menjalankan script `install.sh`.**
-Anda membutuhkan hak eksekusi. Ketik perintah `chmod +x install.sh` lalu jalankan kembali menggunakan `sudo bash install.sh`.
-
-**5. Error "docker-compose: command not found".**
-Pada versi Docker terbaru, gunakan perintah `docker compose` (menggunakan spasi, tanpa tanda hubung). Pastikan plugin Docker Compose sudah terpasang di sistem.
-
-**6. Error "port is already allocated" saat proses instalasi (selain CasaOS).**
-Artinya port 80 sedang dipakai oleh aplikasi lain (seperti Apache atau Nginx bawaan). Matikan aplikasi tersebut dengan `sudo systemctl stop apache2` atau `sudo systemctl stop nginx`, atau ganti port Eka Dashboard (lihat poin 2).
-
-**7. Dashboard tidak bisa dibuka (timeout) dari PC / HP lain.**
-Pastikan perangkat terhubung di jaringan (WiFi/LAN) yang sama dengan server. Pastikan juga IP Address yang dimasukkan benar. Jika menggunakan Ubuntu/Debian, pastikan *firewall* tidak memblokir port 80 dengan menjalankan `sudo ufw allow 80`.
-
-**8. Error "unzip: command not found" saat mencoba mengekstrak file installer.**
-Sistem Anda belum memiliki aplikasi unzip. Instal terlebih dahulu dengan mengetik `sudo apt-get update && sudo apt-get install -y unzip`.
-
-**9. Tampilan Dashboard *blank* putih atau berantakan.**
-Masalah ini umumnya disebabkan oleh *cache* browser yang nyangkut. Tekan tombol **Ctrl + F5** (di Windows) atau **Cmd + Shift + R** (di Mac) pada halaman dashboard untuk melakukan *Hard Reload*.
-
-**10. Muncul pesan error "502 Bad Gateway".**
-Artinya *container* web server sudah berjalan, namun aplikasi di dalamnya masih proses *booting* atau mengalami *crash*. Tunggu sekitar 10-15 detik dan *refresh* halaman. Jika masih error, cek log sistem.
-
-**11. Bagaimana cara melihat pesan error lengkap (Log Sistem)?**
-Masuk ke direktori instalasi (`cd /root/eka_dashboard`) dan ketik `sudo docker compose logs -f`. Di situ Anda bisa melihat aktivitas sistem atau peringatan error secara *real-time*. Tekan Ctrl+C untuk keluar.
-
-**12. Bagaimana cara mematikan sementara (stop) Eka Dashboard?**
-Masuk ke direktori instalasi, lalu eksekusi perintah `sudo docker compose down`. Untuk menyalakannya kembali, jalankan `sudo docker compose up -d`.
-
-**13. Bagaimana cara memperbarui (Update) Eka Dashboard ke versi terbaru?**
-Jika Anda menginstal menggunakan metode Git Clone, ketik perintah berikut di direktori instalasi:
-```bash
-git pull
-sudo docker compose up -d --build
-```
-Sistem akan otomatis mengunduh kode terbaru dan melakukan *build* ulang tanpa menghilangkan data pengaturan.
-
-**14. Dashboard berjalan sangat lambat atau sering macet.**
-Hal ini bisa terjadi jika memori (RAM) server penuh. Gunakan perintah `htop` untuk mengecek status penggunaan CPU dan RAM. Jika RAM sangat minim (< 1GB), disarankan untuk menambahkan *Swap Memory* di Linux Anda minimal 1GB - 2GB.
-
-**15. Error "permission denied while trying to connect to the Docker daemon socket".**
-Anda tidak memiliki izin akses ke layanan Docker. Pastikan Anda menambahkan awalan `sudo` di setiap perintah docker, atau masukkan user Anda ke grup docker dengan perintah `sudo usermod -aG docker $USER` lalu relogin.
+Dokumen ini menjelaskan perilaku branch pengembangan \`fix/critical-bugs\`; tetap periksa hasil CI dan konfigurasi host sebelum menerapkan perubahan di server produksi.
