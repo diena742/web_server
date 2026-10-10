@@ -27,13 +27,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Keyboard shortcuts
+    // File-manager shortcuts must not hijack editing/copy/paste inside inputs.
     document.addEventListener('keydown', (e) => {
+        const target = e.target;
+        if (target instanceof HTMLElement &&
+            (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) {
+            return;
+        }
         if (e.key === 'Delete' && selectedItem) deleteItem();
         if (e.key === 'F2' && selectedItem) renameItem();
-        if (e.ctrlKey && e.key === 'c' && selectedItem) copyItem('copy');
-        if (e.ctrlKey && e.key === 'x' && selectedItem) copyItem('cut');
-        if (e.ctrlKey && e.key === 'v' && clipboard) pasteItem();
+        if (e.ctrlKey && e.key.toLowerCase() === 'c' && selectedItem) copyItem('copy');
+        if (e.ctrlKey && e.key.toLowerCase() === 'x' && selectedItem) copyItem('cut');
+        if (e.ctrlKey && e.key.toLowerCase() === 'v' && clipboard) pasteItem();
     });
 });
 
@@ -75,37 +80,61 @@ function renderDriveTable(drives) {
         
         const usedGB = drive.total ? (drive.used / 1024**3).toFixed(1) : '-';
         const totalGB = drive.total ? (drive.total / 1024**3).toFixed(1) : '-';
-        const percent = drive.percent || 0;
+        const rawPercent = Number(drive.percent);
+        const percent = Number.isFinite(rawPercent) ? Math.max(0, Math.min(100, rawPercent)) : 0;
         
         // Progress bar style for disk usage
         let barColor = '#238636'; // Green
         if (percent > 70) barColor = '#d29922'; // Yellow
         if (percent > 90) barColor = '#f85149'; // Red
 
-        tr.innerHTML = `
-            <td>
-                <div style="display:flex; align-items:center; gap:0.8rem">
-                    <span class="fm-icon dir" style="font-size:1.2rem"><i class="fa-solid fa-hard-drive"></i></span>
-                    <div>
-                        <div style="font-weight:500">${drive.mountpoint}</div>
-                        <div style="font-size:0.75rem; color:#888">${drive.device} (${drive.fstype})</div>
-                    </div>
-                </div>
-            </td>
-            <td>
-                <div style="width:120px">
-                    <div style="font-size:0.75rem; margin-bottom:4px; display:flex; justify-content:space-between">
-                        <span>${usedGB} / ${totalGB} GB</span>
-                        <span>${percent}%</span>
-                    </div>
-                    <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden">
-                        <div style="width:${percent}%; height:100%; background:${barColor}"></div>
-                    </div>
-                </div>
-            </td>
-            <td style="color:var(--text-muted)">-</td>
-            <td style="color:var(--text-muted)">-</td>
-        `;
+        const nameCell = document.createElement('td');
+        const driveInfo = document.createElement('div');
+        driveInfo.style.cssText = 'display:flex; align-items:center; gap:0.8rem';
+        const driveIcon = document.createElement('span');
+        driveIcon.className = 'fm-icon dir';
+        driveIcon.style.fontSize = '1.2rem';
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-hard-drive';
+        driveIcon.appendChild(icon);
+        const driveLabels = document.createElement('div');
+        const mountLabel = document.createElement('div');
+        mountLabel.style.fontWeight = '500';
+        mountLabel.textContent = String(drive.mountpoint ?? '-');
+        const deviceLabel = document.createElement('div');
+        deviceLabel.style.cssText = 'font-size:0.75rem; color:#888';
+        deviceLabel.textContent = `${drive.device ?? ''} (${drive.fstype ?? ''})`;
+        driveLabels.append(mountLabel, deviceLabel);
+        driveInfo.append(driveIcon, driveLabels);
+        nameCell.appendChild(driveInfo);
+
+        const usageCell = document.createElement('td');
+        const usage = document.createElement('div');
+        usage.style.width = '120px';
+        const usageLabels = document.createElement('div');
+        usageLabels.style.cssText = 'font-size:0.75rem; margin-bottom:4px; display:flex; justify-content:space-between';
+        const usedLabel = document.createElement('span');
+        usedLabel.textContent = `${usedGB} / ${totalGB} GB`;
+        const percentLabel = document.createElement('span');
+        percentLabel.textContent = `${percent}%`;
+        usageLabels.append(usedLabel, percentLabel);
+        const track = document.createElement('div');
+        track.style.cssText = 'height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden';
+        const bar = document.createElement('div');
+        bar.style.width = `${percent}%`;
+        bar.style.height = '100%';
+        bar.style.backgroundColor = barColor;
+        track.appendChild(bar);
+        usage.append(usageLabels, track);
+        usageCell.appendChild(usage);
+
+        const permissionCell = document.createElement('td');
+        permissionCell.style.color = 'var(--text-muted)';
+        permissionCell.textContent = '-';
+        const modifiedCell = document.createElement('td');
+        modifiedCell.style.color = 'var(--text-muted)';
+        modifiedCell.textContent = '-';
+        tr.append(nameCell, usageCell, permissionCell, modifiedCell);
         tbody.appendChild(tr);
     });
 }
@@ -164,7 +193,9 @@ function buildSidebarTree() {
                     const div = document.createElement('div');
                     div.className = 'tree-item';
                     div.dataset.path = drive.mountpoint;
-                    div.innerHTML = `<i class="fa-solid fa-hard-drive"></i> ${drive.mountpoint}`;
+                    const icon = document.createElement('i');
+                    icon.className = 'fa-solid fa-hard-drive';
+                    div.append(icon, document.createTextNode(' ' + String(drive.mountpoint ?? '-')));
                     div.onclick = () => loadFiles(drive.mountpoint);
                     container.appendChild(div);
                 });
@@ -300,20 +331,70 @@ function renderTable(items, isNew) {
         tr.ondblclick = () => openItem(item);
         tr.oncontextmenu = (e) => showContextMenu(e, item, tr);
 
+        // Long-press is the touch equivalent of a right-click context menu.
+        // Movement cancels the timer so scrolling remains responsive.
+        let pressTimer = null;
+        let startX = 0;
+        let startY = 0;
+        tr.addEventListener('touchstart', event => {
+            if (event.touches.length !== 1) return;
+            const touch = event.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+            pressTimer = window.setTimeout(() => {
+                pressTimer = null;
+                showContextMenu({
+                    preventDefault: () => {},
+                    clientX: startX,
+                    clientY: startY
+                }, item, tr);
+            }, 550);
+        }, { passive: true });
+
+        const cancelLongPress = () => {
+            if (pressTimer !== null) {
+                window.clearTimeout(pressTimer);
+                pressTimer = null;
+            }
+        };
+        tr.addEventListener('touchmove', event => {
+            if (pressTimer === null || !event.touches.length) return;
+            const touch = event.touches[0];
+            if (Math.abs(touch.clientX - startX) > 12 || Math.abs(touch.clientY - startY) > 12) {
+                cancelLongPress();
+            }
+        }, { passive: true });
+        tr.addEventListener('touchend', cancelLongPress, { passive: true });
+        tr.addEventListener('touchcancel', cancelLongPress, { passive: true });
+
         let iconClass = item.is_dir ? 'fa-folder dir' : 'fa-file file';
         if (!item.is_dir) {
-            if (item.name.match(/\.(py|js|html|css|json|xml|sh)$/i)) iconClass = 'fa-file-code file';
-            else if (item.name.match(/\.(txt|log|md|conf)$/i)) iconClass = 'fa-file-lines file';
-            else if (item.name.match(/\.(png|jpg|jpeg|gif|svg)$/i)) iconClass = 'fa-file-image file';
-            else if (item.name.match(/\.(zip|tar|gz|7z)$/i)) iconClass = 'fa-file-zipper file';
+            if (/\.(py|js|html|css|json|xml|sh)$/i.test(item.name)) iconClass = 'fa-file-code file';
+            else if (/\.(txt|log|md|conf)$/i.test(item.name)) iconClass = 'fa-file-lines file';
+            else if (/\.(png|jpg|jpeg|gif|svg)$/i.test(item.name)) iconClass = 'fa-file-image file';
+            else if (/\.(zip|tar|gz|7z)$/i.test(item.name)) iconClass = 'fa-file-zipper file';
         }
 
-        tr.innerHTML = `
-            <td><span class="fm-icon ${item.is_dir ? 'dir' : 'file'}"><i class="fa-solid ${iconClass.split(' ')[0]}"></i></span>${item.name}</td>
-            <td>${item.size}</td>
-            <td style="font-family:monospace; color:#888">${item.perm || '-'}</td>
-            <td style="color:var(--text-muted)">${item.date}</td>
-        `;
+        // File names and metadata originate from the host filesystem. Use
+        // textContent so unusual filenames cannot inject markup or scripts.
+        const nameCell = document.createElement('td');
+        const iconWrap = document.createElement('span');
+        iconWrap.className = 'fm-icon ' + (item.is_dir ? 'dir' : 'file');
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid ' + iconClass.split(' ')[0];
+        iconWrap.appendChild(icon);
+        nameCell.append(iconWrap, document.createTextNode(String(item.name ?? '')));
+
+        const sizeCell = document.createElement('td');
+        sizeCell.textContent = String(item.size ?? '');
+        const permissionCell = document.createElement('td');
+        permissionCell.style.cssText = 'font-family:monospace; color:#888';
+        permissionCell.textContent = String(item.perm ?? '-');
+        const modifiedCell = document.createElement('td');
+        modifiedCell.style.color = 'var(--text-muted)';
+        modifiedCell.textContent = String(item.date ?? '-');
+
+        tr.append(nameCell, sizeCell, permissionCell, modifiedCell);
         tbody.appendChild(tr);
     });
 }
