@@ -82,8 +82,23 @@ Untuk membuat token, jalankan di server dan simpan nilainya hanya di konfigurasi
 cd /root/eka_dashboard
 umask 077
 touch .env
-sed -i '/^SECRET_KEY=/d' .env
-printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
+if ! grep -Eq '^SECRET_KEY=.+
+sed -i '/^MOBILE_ACCESS_TOKEN=/d' .env
+TOKEN="$(openssl rand -hex 32)"
+printf 'MOBILE_ACCESS_TOKEN=%s\n' "$TOKEN" >> .env
+chmod 600 .env
+printf 'Atur header X-Mobile-Key aplikasi Android menjadi: %s\n' "$TOKEN"
+sudo docker compose up -d --build
+\`\`\`
+
+Perintah ini mengganti secret sesi, sehingga semua sesi browser yang sudah aktif akan diminta login kembali. Jika Anda hanya perlu membuat token mobile dan telah memiliki \`SECRET_KEY\` yang benar, jangan menghapus atau menggantinya; hapus hanya baris \`MOBILE_ACCESS_TOKEN\` lama sebelum membuat token baru.
+
+Jangan masukkan nilai secret atau token ke source code, commit Git, screenshot, issue, atau Pull Request.
+
+ .env; then
+    sed -i '/^SECRET_KEY=/d' .env
+    printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
+fi
 sed -i '/^MOBILE_ACCESS_TOKEN=/d' .env
 TOKEN="$(openssl rand -hex 32)"
 printf 'MOBILE_ACCESS_TOKEN=%s\n' "$TOKEN" >> .env
