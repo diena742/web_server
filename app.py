@@ -5433,77 +5433,123 @@ def mobile_backup_mkdir():
 @app.route('/api/mobile-backup/rename', methods=['POST'])
 @mobile_backup_auth_required
 def mobile_backup_rename():
-    """Rename file atau folder"""
-    data = request.get_json()
+    """Rename a file/folder without overwriting an existing destination."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
     old_path = data.get('path', '')
-    new_name = data.get('new_name', '').strip()
-    if not new_name or '/' in new_name or new_name.startswith('.'):
+    new_name = data.get('new_name', '').strip() if isinstance(data.get('new_name', ''), str) else ''
+    if (
+        not new_name or new_name.startswith('.')
+        or '/' in new_name or '\\' in new_name
+        or any(ord(ch) < 32 for ch in new_name)
+    ):
         return jsonify({"error": "Nama tidak valid"}), 400
-    real_old = os.path.realpath(old_path)
+
+    real_old = os.path.realpath(old_path) if isinstance(old_path, str) else ''
     real_base = os.path.realpath(BACKUP_BASE_DIR)
     if not is_within_base(real_old, real_base) or real_old == real_base:
         return jsonify({"error": "Akses ditolak"}), 403
+    if not os.path.lexists(real_old):
+        return jsonify({"error": "File tidak ditemukan"}), 404
+
     new_path = os.path.join(os.path.dirname(real_old), new_name)
+    if not is_within_base(new_path, real_base):
+        return jsonify({"error": "Akses ditolak"}), 403
+    if os.path.lexists(new_path):
+        return jsonify({"error": "Destination already exists"}), 409
+
     try:
         os.rename(real_old, new_path)
         return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Unable to rename item"}), 500
+
 
 @app.route('/api/mobile-backup/move', methods=['POST'])
 @mobile_backup_auth_required
 def mobile_backup_move():
-    """Pindah file atau folder (Cut & Paste)"""
-    data = request.get_json()
+    """Move a file/folder without overwriting an existing destination."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
     src = data.get('src')
     dest_dir = data.get('dest_dir')
-    if not src or not dest_dir:
+    if not isinstance(src, str) or not isinstance(dest_dir, str) or not src or not dest_dir:
         return jsonify({"error": "Data tidak lengkap"}), 400
-    
+
     real_src = os.path.realpath(src)
     real_dest_dir = os.path.realpath(dest_dir)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
-    
-    if (not is_within_base(real_src, real_base) or real_src == real_base
-            or not is_within_base(real_dest_dir, real_base)):
+    if (
+        not is_within_base(real_src, real_base) or real_src == real_base
+        or not is_within_base(real_dest_dir, real_base)
+    ):
         return jsonify({"error": "Akses ditolak"}), 403
-        
+    if not os.path.lexists(real_src) or not os.path.isdir(real_dest_dir):
+        return jsonify({"error": "Source or destination folder not found"}), 404
+    if os.path.isdir(real_src):
+        try:
+            if os.path.commonpath([real_src, real_dest_dir]) == real_src:
+                return jsonify({"error": "Cannot move a folder into itself"}), 400
+        except (OSError, ValueError):
+            return jsonify({"error": "Invalid destination"}), 400
+
+    dest = os.path.join(real_dest_dir, os.path.basename(real_src))
+    if os.path.lexists(dest):
+        return jsonify({"error": "Destination already exists"}), 409
     try:
         import shutil
-        dest = os.path.join(real_dest_dir, os.path.basename(real_src))
         shutil.move(real_src, dest)
         return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Unable to move item"}), 500
+
 
 @app.route('/api/mobile-backup/copy', methods=['POST'])
 @mobile_backup_auth_required
 def mobile_backup_copy():
-    """Salin file atau folder (Copy & Paste)"""
-    data = request.get_json()
+    """Copy a file/folder without overwriting an existing destination."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
     src = data.get('src')
     dest_dir = data.get('dest_dir')
-    if not src or not dest_dir:
+    if not isinstance(src, str) or not isinstance(dest_dir, str) or not src or not dest_dir:
         return jsonify({"error": "Data tidak lengkap"}), 400
-    
+
     real_src = os.path.realpath(src)
     real_dest_dir = os.path.realpath(dest_dir)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
-    
-    if (not is_within_base(real_src, real_base) or real_src == real_base
-            or not is_within_base(real_dest_dir, real_base)):
+    if (
+        not is_within_base(real_src, real_base) or real_src == real_base
+        or not is_within_base(real_dest_dir, real_base)
+    ):
         return jsonify({"error": "Akses ditolak"}), 403
-        
+    if not os.path.lexists(real_src) or not os.path.isdir(real_dest_dir):
+        return jsonify({"error": "Source or destination folder not found"}), 404
+    if not os.path.isfile(real_src) and not os.path.isdir(real_src):
+        return jsonify({"error": "Unsupported source item"}), 400
+    if os.path.isdir(real_src):
+        try:
+            if os.path.commonpath([real_src, real_dest_dir]) == real_src:
+                return jsonify({"error": "Cannot copy a folder into itself"}), 400
+        except (OSError, ValueError):
+            return jsonify({"error": "Invalid destination"}), 400
+
+    dest = os.path.join(real_dest_dir, os.path.basename(real_src))
+    if os.path.lexists(dest):
+        return jsonify({"error": "Destination already exists"}), 409
     try:
         import shutil
-        dest = os.path.join(real_dest_dir, os.path.basename(real_src))
         if os.path.isdir(real_src):
-            shutil.copytree(real_src, dest)
+            shutil.copytree(real_src, dest, symlinks=False)
         else:
             shutil.copy2(real_src, dest)
         return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Unable to copy item"}), 500
+
 
 @app.route('/api/mobile-backup/download-file', methods=['GET'])
 @mobile_backup_auth_required
@@ -5522,38 +5568,46 @@ def mobile_backup_download_file():
 @app.route('/api/mobile-backup/files', methods=['GET'])
 @mobile_backup_auth_required
 def mobile_backup_list_files():
-    """List semua file dan folder di direktori backup HDD"""
-    try:
-        path = request.args.get('path')
-        if not path:
-            path = BACKUP_BASE_DIR
-        # Keamanan: pastikan path tidak keluar dari BACKUP_BASE_DIR
-        real_path = os.path.realpath(path)
-        real_base = os.path.realpath(BACKUP_BASE_DIR)
-        if not is_within_base(real_path, real_base):
-            return jsonify({"error": "Akses ditolak"}), 403
+    """List files without creating arbitrary missing directories on GET."""
+    path = request.args.get('path') or BACKUP_BASE_DIR
+    real_path = os.path.realpath(path)
+    real_base = os.path.realpath(BACKUP_BASE_DIR)
+    if not is_within_base(real_path, real_base):
+        return jsonify({"error": "Akses ditolak"}), 403
 
-        os.makedirs(real_path, exist_ok=True)
+    try:
+        # Initial use may create the single configured root, but never create
+        # an arbitrary missing subfolder just because it was queried.
+        if real_path == real_base and not os.path.exists(real_base):
+            os.makedirs(real_base, exist_ok=True)
+        if not os.path.isdir(real_path):
+            return jsonify({"error": "Folder tidak ditemukan"}), 404
+
         items = []
-        for entry in sorted(os.scandir(real_path), key=lambda e: (not e.is_dir(), e.name.lower())):
-            stat = entry.stat()
-            items.append({
-                "name": entry.name,
-                "type": "folder" if entry.is_dir() else "file",
-                "size": stat.st_size,
-                "modified": stat.st_mtime,
-                "path": entry.path
-            })
-        # Hitung total size folder
+        with os.scandir(real_path) as scanner:
+            entries = sorted(scanner, key=lambda e: (not e.is_dir(follow_symlinks=False), e.name.lower()))
+            for entry in entries:
+                if entry.is_symlink():
+                    continue
+                stat = entry.stat(follow_symlinks=False)
+                is_dir = entry.is_dir(follow_symlinks=False)
+                items.append({
+                    "name": entry.name,
+                    "type": "folder" if is_dir else "file",
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime,
+                    "path": entry.path,
+                })
         total_size = sum(i['size'] for i in items if i['type'] == 'file')
         return jsonify({
-            "current_path": path,
+            "current_path": real_path,
             "base_path": BACKUP_BASE_DIR,
             "items": items,
             "total_size": total_size
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        return jsonify({"error": "Unable to list backup folder"}), 500
+
 
 @app.route('/api/mobile-backup/delete', methods=['POST'])
 @mobile_backup_auth_required
