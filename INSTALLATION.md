@@ -57,8 +57,19 @@ Jika Anda memiliki file `.zip` (misalnya `eka_dashboard_retail.zip`):
 ## 3. Apa yang Dilakukan Script Installer?
 Saat Anda menjalankan `sudo bash install.sh`, sistem akan melakukan beberapa hal:
 - Mengecek dan memasang **Docker** (serta Docker Compose) secara otomatis jika belum ada.
-- Memeriksa **Port 80**. Jika server Anda menggunakan *CasaOS* di port 80, port CasaOS akan dipindahkan otomatis ke `9999` untuk menghindari bentrok.
+- Memeriksa ketersediaan port dashboard tanpa menghentikan proses host atau mengubah konfigurasi CasaOS secara otomatis.
 - Membangun dan menjalankan *container* Eka Dashboard secara otomatis.
+
+### Konfigurasi Port dan CasaOS
+
+Secara default dashboard memakai port host `80`. Jika port tersebut telah digunakan CasaOS, Nginx, Apache, atau aplikasi lain, tentukan port kosong pada file `.env` di direktori proyek sebelum menjalankan installer:
+
+```bash
+printf 'DASHBOARD_PORT=8080\n' >> .env
+sudo bash install.sh
+```
+
+Kemudian akses dashboard melalui `http://IP-SERVER:8080`. Installer tidak lagi mengubah port CasaOS, menonaktifkan web server, atau mematikan proses lain secara otomatis.
 
 Jika instalasi sukses, Anda akan melihat pesan seperti:
 > **INSTALASI SUKSES!**  
@@ -106,7 +117,7 @@ Token ini hanya berlaku untuk API `/api/mobile-backup/*`, bukan untuk melewati a
 Berikut adalah 15 daftar kendala yang sering terjadi beserta solusinya:
 
 **1. Server menggunakan CasaOS, apakah akan bermasalah?**
-Tidak. Script installer otomatis mendeteksi CasaOS dan akan memindahkan port CasaOS dari `80` menjadi `9999`. Anda dapat mengakses CasaOS kembali di `http://IP-SERVER:9999`, sementara Eka Dashboard menggunakan port `80`.
+Installer tidak mengubah port CasaOS. Jika CasaOS memakai port 80, atur `DASHBOARD_PORT=8080` pada file `.env`, lalu jalankan installer dan buka dashboard di `http://IP-SERVER:8080`.
 
 **2. Bagaimana cara mengganti Port Eka Dashboard agar tidak menggunakan Port 80?**
 1. Masuk ke direktori instalasi: `cd /root/eka_dashboard`
