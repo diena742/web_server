@@ -111,6 +111,19 @@ Perintah ini mengganti secret sesi, sehingga semua sesi browser yang sudah aktif
 
 Jangan masukkan nilai secret atau token ke source code, commit Git, screenshot, issue, atau Pull Request.
 
+### Akses file untuk role operator dan read-only
+
+Karena dashboard memiliki akses host-level untuk file manager, role `operator` dan `readonly` tidak boleh otomatis membaca seluruh filesystem (termasuk `.env` dan konfigurasi sistem). Secara default akses file untuk role tersebut belum diaktifkan. Jika mereka memang perlu melihat folder bersama, buat direktori yang memang aman untuk dibagikan dan set path container di `.env`:
+
+```bash
+sudo mkdir -p /mnt/data/DashboardShared
+sudo chmod 755 /mnt/data/DashboardShared
+printf 'FILES_READONLY_ROOTS=/host/root/mnt/data/DashboardShared\\n' >> /root/eka_dashboard/.env
+sudo docker compose up -d
+```
+
+Anda dapat mencantumkan beberapa direktori yang dipercaya dengan memisahkannya memakai koma. Path harus berupa path di dalam container, biasanya diawali `/host/root/`. Owner/admin tetap memiliki akses file manager penuh.
+
 ### CORS dan cookie sesi
 
 Secara default UI dan Socket.IO hanya menerima origin yang sama dengan dashboard. Jika memang memakai frontend browser dari origin lain, set \`DASHBOARD_ALLOWED_ORIGINS\` di \`.env\` sebagai daftar origin lengkap dipisahkan koma, misalnya \`https://dashboard.example.com\`. Jangan memakai wildcard untuk origin yang membawa cookie sesi. Jika dashboard diakses melalui HTTPS, set \`SESSION_COOKIE_SECURE=1\`; nilai default \`0\` dipakai saat akses langsung melalui HTTP di LAN.
