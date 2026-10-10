@@ -86,10 +86,11 @@
 <body>
     <div class="card">
         <h2>Welcome! 👋</h2>
-        <p>Please create your administrator account to secure this dashboard. Use a password with at least 12 characters.</p>
+        <p>To prevent another device from claiming the first owner account, enter the one-time setup token from the server console. Use a password with at least 12 characters.</p>
 
         <form id="setupForm">
-            <input type="text" id="username" placeholder="Username (e.g. admin)" required>
+            <input type="password" id="setup_token" placeholder="One-time Setup Token" required minlength="32" autocomplete="off">
+            <input type="text" id="username" placeholder="Username (e.g. admin)" required autocomplete="username">
             <input type="password" id="password" placeholder="New Password (12+ characters)" required minlength="12">
             <input type="password" id="confirm_password" placeholder="Confirm Password" required minlength="12">
             <button type="submit" id="btn-submit">Create Account & Login</button>
@@ -100,7 +101,8 @@
     <script>
         document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const user = document.getElementById('username').value;
+            const setupToken = document.getElementById('setup_token').value.trim();
+            const user = document.getElementById('username').value.trim();
             const pass = document.getElementById('password').value;
             const confirm = document.getElementById('confirm_password').value;
             const btn = document.getElementById('btn-submit');
@@ -119,7 +121,7 @@
                 const res = await fetch('/api/setup-admin', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: user, password: pass })
+                    body: JSON.stringify({ setup_token: setupToken, username: user, password: pass })
                 });
                 const data = await res.json();
 
