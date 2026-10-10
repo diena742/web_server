@@ -621,5 +621,51 @@ class PermissionHierarchyTests(unittest.TestCase):
         run_command.assert_called_once_with(["systemctl", "is-active", "ssh"])
 
 
+
+class HostManagementReadAuthorizationTests(unittest.TestCase):
+    def test_readonly_role_cannot_query_admin_host_management_apis(self):
+        dashboard.app.testing = True
+        client = dashboard.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "viewer",
+                "role": "readonly",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+        config = {"require_auth": True, "session_timeout": 3600}
+        protected_endpoints = [
+            "/api/network/info",
+            "/api/storage/disks",
+            "/api/storage/info",
+            "/api/smb/status",
+            "/api/smb/shares",
+            "/api/vpn/status",
+            "/api/vpn/clients",
+            "/api/vpn/client/example/config",
+            "/api/store/catalog",
+            "/api/store/installed",
+            "/api/zerotier/status",
+            "/api/vpn/scan",
+            "/api/lxd/containers",
+            "/api/websites/nginx_status",
+            "/api/websites/threats",
+            "/api/websites/threats/blocked_ips",
+            "/api/web_monitor/config",
+            "/api/web_monitor/security",
+            "/api/web_monitor/backup",
+            "/api/webpanel/database",
+        ]
+        with patch.object(dashboard, "load_security_config", return_value=config), \
+             patch.object(dashboard.subprocess, "run") as host_command:
+            statuses = {
+                path: client.get(path).status_code
+                for path in protected_endpoints
+            }
+        self.assertEqual(statuses, {path: 403 for path in protected_endpoints})
+        host_command.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
