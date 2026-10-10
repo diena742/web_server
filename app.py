@@ -1089,47 +1089,36 @@ def network_ports():
     return jsonify(connections)
 
 @app.route('/api/network-details')
-@login_required
+@admin_required
 def network_details():
     interfaces = []
     addrs = psutil.net_if_addrs()
     stats = psutil.net_if_stats()
-    
     for name, snics in addrs.items():
         ip = "N/A"
         for snic in snics:
             if snic.family == socket.AF_INET:
                 ip = snic.address
                 break
-        
-        is_up = "Down"
-        if name in stats and stats[name].isup:
-            is_up = "Up"
-            
-        interfaces.append({
-            'name': name,
-            'ip': ip,
-            'status': is_up
-        })
-        
+        is_up = "Up" if name in stats and stats[name].isup else "Down"
+        interfaces.append({"name": name, "ip": ip, "status": is_up})
     return jsonify(interfaces)
+
 
 @app.route('/api/system')
 @login_required
 def system_info():
     uname = platform.uname()
-    
-    # Try getting better CPU name on Linux
     cpu_name = uname.processor
     try:
         if platform.system() == "Linux":
-            command = "cat /proc/cpuinfo"
-            output = subprocess.check_output(command, shell=True).decode().strip()
-            for line in output.split('\n'):
-                if "model name" in line:
-                    cpu_name = line.split(':')[1].strip()
-                    break
-    except:
+            # Reading a fixed procfs file does not require a shell subprocess.
+            with open('/proc/cpuinfo', 'r', encoding='utf-8', errors='replace') as cpuinfo:
+                for line in cpuinfo:
+                    if "model name" in line:
+                        cpu_name = line.split(':', 1)[1].strip()
+                        break
+    except OSError:
         pass
 
     return jsonify({
@@ -1141,9 +1130,6 @@ def system_info():
         "processor": cpu_name,
     })
 
-# --- FILE MANAGER ROUTES ---
-import os
-import shutil
 
 @app.route('/files', endpoint='files')
 @app.route('/files', endpoint='files_page')
@@ -5344,11 +5330,12 @@ def get_mobile_backup_config():
 
 
 @app.route('/mobile-backup')
-@login_required
+@admin_required
 def mobile_backup_page():
     """Halaman Mobile Backup"""
     config = get_mobile_backup_config()
     return render_template('mobile_backup.html', lan_ip=config['lan_ip'], ts_ip=config['ts_ip'])
+
 
 @app.route('/api/mobile-backup/config', methods=['GET'])
 @mobile_backup_auth_required
