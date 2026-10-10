@@ -2777,7 +2777,7 @@ def perform_update():
         working_dir = container.labels.get('com.docker.compose.project.working_dir')
         if not working_dir:
             working_dir = '/root/eka_dashboard'
-        if not isinstance(working_dir, str) or not os.path.isabs(working_dir) or '\\x00' in working_dir:
+        if not isinstance(working_dir, str) or not os.path.isabs(working_dir) or '\x00' in working_dir:
             return jsonify({'success': False, 'error': 'Direktori instalasi tidak valid.'}), 400
 
         # Quote the path for the inner shell and pass nsenter as argv; never use
