@@ -305,6 +305,159 @@
             display: flex;
             justify-content: space-between;
         }
+    
+
+        /* Responsive and touch-friendly file manager */
+        .fm-container {
+            position: relative;
+            min-width: 0;
+        }
+
+        .fm-table tr {
+            touch-action: manipulation;
+        }
+
+        .fm-detail {
+            max-height: 100%;
+            box-sizing: border-box;
+        }
+
+        #search-input {
+            min-width: 0;
+        }
+
+        @media (max-width: 900px) {
+            .fm-sidebar {
+                width: 190px;
+            }
+
+            .fm-detail {
+                width: 245px;
+            }
+
+            .fm-table th,
+            .fm-table td {
+                padding: 0.45rem 0.5rem;
+            }
+        }
+
+        @media (max-width: 700px) {
+            .app-container {
+                padding: 0.4rem !important;
+            }
+
+            .fm-container {
+                height: calc(100dvh - 145px);
+                min-height: 250px;
+                flex-direction: column;
+            }
+
+            .fm-sidebar {
+                width: 100%;
+                max-height: 25%;
+                flex: 0 0 auto;
+                border-right: 0;
+                border-bottom: 1px solid var(--glass-border);
+                padding: 0.35rem;
+            }
+
+            .fm-sidebar.collapsed {
+                width: 100%;
+                height: 0;
+                max-height: 0;
+                border: 0;
+            }
+
+            .fm-main {
+                width: 100%;
+                min-height: 0;
+                flex: 1 1 auto;
+            }
+
+            .fm-header {
+                padding: 0.45rem;
+                gap: 0.4rem;
+            }
+
+            .fm-header > div {
+                max-width: 100%;
+                flex-wrap: wrap;
+            }
+
+            #search-input {
+                width: 42vw !important;
+                max-width: 170px;
+            }
+
+            .fm-btn {
+                min-height: 40px;
+                padding: 0.45rem 0.6rem;
+            }
+
+            .fm-table {
+                font-size: 0.78rem;
+            }
+
+            .fm-table th,
+            .fm-table td {
+                padding: 0.55rem 0.4rem;
+            }
+
+            .fm-table th:nth-child(3),
+            .fm-table td:nth-child(3),
+            .fm-table th:nth-child(4),
+            .fm-table td:nth-child(4) {
+                display: none;
+            }
+
+            .fm-table td:first-child {
+                overflow-wrap: anywhere;
+            }
+
+            .fm-status {
+                padding: 0.4rem 0.5rem;
+                font-size: 0.72rem;
+                gap: 0.5rem;
+            }
+
+            .fm-status span:last-child {
+                max-width: 55%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                text-align: right;
+            }
+
+            .fm-detail {
+                position: absolute;
+                right: 0.35rem;
+                left: 0.35rem;
+                bottom: 0.35rem;
+                width: auto;
+                max-height: 55%;
+                overflow: auto;
+                z-index: 30;
+                border: 1px solid var(--glass-border);
+                border-radius: 12px;
+                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+                background: #171923;
+            }
+
+            .fm-detail-actions .fm-btn,
+            .ctx-item {
+                min-height: 44px;
+            }
+
+            .context-menu {
+                min-width: 190px;
+                max-width: calc(100vw - 16px);
+            }
+
+            .ctx-item {
+                padding: 0.7rem 0.9rem;
+            }
+        }
+
     </style>
 </head>
 
@@ -381,8 +534,10 @@
                     <span id="status-path">/</span>
                 </div>
 
-                <!-- Detail Panel -->
-                <div class="fm-detail hidden" id="detail-panel">
+            </div>
+
+            <!-- Detail Panel -->
+            <div class="fm-detail hidden" id="detail-panel">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
                         <h4 id="detail-name" style="margin:0; word-break:break-all">-</h4>
                         <button class="fm-btn" onclick="closeDetailPanel()" style="padding:0.3rem 0.5rem"><i
@@ -402,7 +557,6 @@
                                 class="fa-solid fa-trash"></i> Delete</button>
                     </div>
                 </div>
-            </div>
         </div>
 
         <!-- Context Menu -->
