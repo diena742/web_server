@@ -197,15 +197,24 @@ PERMISSIONS = {
 }
 
 def has_permission(role, feature, level='any'):
-    """Check if a role has permission for a feature
-    level: 'any' (any access), 'full', 'view', 'limited', True
+    """Check feature access using the application's permission hierarchy.
+
+    "full" grants every level. "limited" includes view access but does not
+    imply full control. "read" remains a distinct capability for file APIs.
     """
     if role not in PERMISSIONS:
         return False
+
     perm = PERMISSIONS[role].get(feature, False)
     if level == 'any':
         return bool(perm)
-    return perm == level or perm == 'full' or perm == True
+    if perm is False or perm is None:
+        return False
+    if perm is True or perm == 'full':
+        return True
+    if perm == 'limited' and level in ('view', 'limited'):
+        return True
+    return perm == level
 
 def get_role_level(role):
     """Get numeric level of role (lower = more powerful)"""
