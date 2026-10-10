@@ -637,6 +637,7 @@ class HostManagementReadAuthorizationTests(unittest.TestCase):
         config = {"require_auth": True, "session_timeout": 3600}
         protected_endpoints = [
             "/api/network/info",
+            "/api/network-details",
             "/api/storage/disks",
             "/api/storage/info",
             "/api/smb/status",
@@ -857,6 +858,27 @@ class MobileBackupSafetyTests(unittest.TestCase):
                 )
             self.assertEqual(response.status_code, 400)
             self.assertFalse(os.path.exists(config_file))
+
+
+
+class MobileBackupPageAuthorizationTests(unittest.TestCase):
+    def test_readonly_user_cannot_open_mobile_backup_management_page(self):
+        dashboard.app.testing = True
+        client = dashboard.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "viewer",
+                "role": "readonly",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+        with patch.object(
+            dashboard, "load_security_config",
+            return_value={"require_auth": True, "session_timeout": 3600},
+        ):
+            response = client.get("/mobile-backup")
+        self.assertIn(response.status_code, (302, 403))
 
 
 if __name__ == "__main__":
