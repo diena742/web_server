@@ -51,6 +51,69 @@ class AuthenticationGuardTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.get_json()["error"], "Initial setup required")
 
+    def test_first_run_setup_rejects_missing_setup_token(self):
+        config = {
+            "username": "admin",
+            "password_hash": hashlib.sha256(b"admin").hexdigest(),
+            "users": [],
+            "require_auth": True,
+        }
+        with patch.dict(os.environ, {"SETUP_TOKEN": ""}), patch.object(
+            dashboard, "load_security_config", return_value=config
+        ):
+            response = self.client.post(
+                "/api/setup-admin",
+                json={"username": "owner", "password": "long enough password"},
+            )
+        self.assertEqual(response.status_code, 503)
+
+    def test_first_run_setup_rejects_incorrect_setup_token(self):
+        config = {
+            "username": "admin",
+            "password_hash": hashlib.sha256(b"admin").hexdigest(),
+            "users": [],
+            "require_auth": True,
+        }
+        with patch.dict(os.environ, {"SETUP_TOKEN": "correct-one-time-token"}), patch.object(
+            dashboard, "load_security_config", return_value=config
+        ):
+            response = self.client.post(
+                "/api/setup-admin",
+                json={
+                    "setup_token": "wrong-token",
+                    "username": "owner",
+                    "password": "long enough password",
+                },
+            )
+        self.assertEqual(response.status_code, 403)
+
+    def test_first_run_setup_accepts_correct_token_and_hashes_password(self):
+        config = {
+            "username": "admin",
+            "password_hash": hashlib.sha256(b"admin").hexdigest(),
+            "users": [],
+            "require_auth": True,
+        }
+        with patch.dict(os.environ, {"SETUP_TOKEN": "correct-one-time-token"}), patch.object(
+            dashboard, "load_security_config", return_value=config
+        ), patch.object(dashboard, "save_security_config") as save_config:
+            response = self.client.post(
+                "/api/setup-admin",
+                json={
+                    "setup_token": "correct-one-time-token",
+                    "username": "new-owner",
+                    "password": "a sufficiently long password",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(config["password_hash"].startswith("pbkdf2:"))
+        self.assertTrue(
+            dashboard.verify_password_hash(
+                "a sufficiently long password", config["password_hash"]
+            )
+        )
+        save_config.assert_called_once_with(config)
+
     def test_file_content_api_rejects_unauthenticated_request(self):
         response = self.client.get(
             "/api/files/content?path=/etc/passwd",
