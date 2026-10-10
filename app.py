@@ -1114,10 +1114,12 @@ def system_info():
 import os
 import shutil
 
-@app.route('/files')
+@app.route('/files', endpoint='files')
+@app.route('/files', endpoint='files_page')
 @requires_permission('files', 'read')
 def files_page():
-    return render_template('files.html')
+    path = request.args.get('path', '/')
+    return render_template('files.html', current_path=path)
 
 def configured_readonly_file_roots():
     """Resolve explicitly configured roots for low-privilege file browsing."""
@@ -1316,7 +1318,8 @@ def file_content():
          return jsonify({'error': str(e)}), 500
 
 # --- TERMINAL ROUTES ---
-@app.route('/terminal')
+@app.route('/terminal', endpoint='terminal')
+@app.route('/terminal', endpoint='terminal_page')
 @requires_permission('terminal')
 def terminal_page():
     return render_template('terminal.html')
@@ -2053,12 +2056,6 @@ def reset_settings():
 CASAOS_URL = 'http://host.docker.internal:9999'
 CASAOS_ALLOWED_IPS = {}  # {ip: expiry_time}
 
-@app.route('/files')
-@login_required
-def files():
-    path = request.args.get('path', '/')
-    return render_template('files.html', current_path=path)
-
 @app.route('/face')
 @login_required
 def face_ui():
@@ -2078,11 +2075,6 @@ def face_stats_api():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-@app.route('/terminal')
-@login_required
-def terminal():
-    return render_template('terminal.html')
 
 @app.route('/casaos')
 @login_required
@@ -4454,7 +4446,8 @@ def update_app_config():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/store/manage', methods=['POST'])
+@app.route('/api/store/manage', methods=['POST'], endpoint='manage_app')
+@app.route('/api/store/manage', methods=['POST'], endpoint='manage_app_endpoint')
 @login_required
 @admin_required
 def manage_app_endpoint():
@@ -4828,48 +4821,6 @@ def install_app():
          return jsonify({'error': 'Failed to pull image'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-@app.route('/api/store/manage', methods=['POST'])
-@login_required
-@admin_required
-def manage_app():
-    """Manage app lifecycle (start/stop/restart/uninstall)"""
-    try:
-        data = request.json
-        app_id = data.get('app_id')
-        action = data.get('action')
-        
-        if not app_id or not action:
-            return jsonify({'error': 'Invalid request'}), 400
-            
-        container_name = f"eka_{app_id}"
-        
-        if action == 'uninstall':
-            subprocess.run(['docker', 'rm', '-f', container_name], capture_output=True)
-            # Optional: Remove volumes? No, keep data safe by default.
-            msg = f"{app_id} uninstalled"
-            
-        elif action == 'start':
-            subprocess.run(['docker', 'start', container_name], capture_output=True)
-            msg = f"{app_id} started"
-            
-        elif action == 'stop':
-            subprocess.run(['docker', 'stop', container_name], capture_output=True)
-            msg = f"{app_id} stopped"
-            
-        elif action == 'restart':
-            subprocess.run(['docker', 'restart', container_name], capture_output=True)
-            msg = f"{app_id} restarted"
-            
-        else:
-            return jsonify({'error': 'Unknown action'}), 400
-            
-        audit_log('APP_MANAGE', f"Action {action} on {app_id}", session.get('username'))
-        return jsonify({'success': True, 'message': msg})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-# =========================================
 
 # --- SYSTEM UPDATE CHECKER ---
 
