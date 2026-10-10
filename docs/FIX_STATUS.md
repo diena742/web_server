@@ -26,7 +26,7 @@ Branch ini sudah mempunyai patch hardening pertama dan tes regresi otomatis. Ini
 
 Workflow `.github/workflows/source-validation.yml` menjalankan kompilasi Python, instalasi dependensi, unit/regression tests, pengecekan sintaks JavaScript dan pengecekan sintaks shell. Run terakhir yang sudah selesai dan diverifikasi sebelum pembaruan dokumentasi ini melaporkan sukses. Cek halaman Actions untuk hasil dari commit paling baru sebelum membuat PR.
 
-Saat ini terdapat 14 tes regresi yang meliputi hash password, first-run login, autentikasi endpoint file/LXD/mobile, terminal anonim, CORS, batas direktori read-only, redaksi secret, hak akses log Docker, dan perubahan password milik pengguna.
+Saat ini terdapat 17 tes regresi yang meliputi hash password, first-run setup/login, token setup yang benar/salah/tidak tersedia, autentikasi endpoint file/LXD/mobile, terminal anonim, CORS, batas direktori read-only, redaksi secret, hak akses log Docker, dan perubahan password milik pengguna.
 
 ## Blocker / risiko yang belum selesai
 
@@ -40,15 +40,15 @@ Saat ini terdapat 14 tes regresi yang meliputi hash password, first-run login, a
 
 `Dockerfile` menjalankan `app:app` dari `app.py`. `app_server.py` masih ada sebagai backend duplikat dan belum menerima patch fungsional yang sama. Verifikasi apakah file tersebut masih didukung; jika tidak, dokumentasikan/depresiasikan. Jika didukung, terapkan hardening setara dan tambahkan tes untuk kedua backend.
 
-### P1 — Route duplikat dalam `app.py`
+### Status perbaikan route duplikat
 
-Audit menemukan definisi berulang untuk `/files`, `/terminal`, dan `/api/store/manage`. Walau beberapa decorator telah diperketat, definisi ganda membuat handler pertama dapat membayangi handler berikutnya dan berisiko menyebabkan perilaku UI/API yang membingungkan. Periksa seluruh pemanggil/template dan tetapkan satu handler per route sebelum PR.
+Handler `/files` dan `/terminal` kini dikonsolidasikan ke satu implementasi berizin, dengan alias endpoint lama dipertahankan untuk `url_for`. Definisi duplikat `/api/store/manage` juga menggunakan satu handler kanonis dengan alias endpoint, sehingga implementasi kedua yang sebelumnya dibayangi telah dihapus. Tetap uji alur UI store dan file manager secara runtime sebelum PR final.
 
-### P1 — Setup awal dan endpoint monitoring publik perlu keputusan eksplisit
+### Setup awal dan endpoint monitoring publik
 
-`/api/setup-admin` harus tetap tersedia untuk setup pertama, tetapi proses pembuatan owner pertama masih bisa dimenangkan oleh klien lain jika dashboard baru dapat diakses bersama sebelum pemilik menyelesaikan wizard. Tambahkan prosedur bootstrap yang aman atau dokumentasikan bahwa setup pertama wajib dilakukan pada jaringan tepercaya sebelum service dipublikasikan.
+Pembuatan owner pertama kini memerlukan `SETUP_TOKEN` yang dihasilkan dan dipertahankan installer dalam file privat `/root/eka_dashboard/.env`. Endpoint setup menolak token hilang/salah dan tidak lagi dapat dibuka ulang melalui `session['setup_mode']`; tes regresi untuk kasus token salah/benar/tidak ada telah ditambahkan.
 
-`/` dan `/api/stats` tetap publik untuk mendukung halaman monitoring/wallboard. Putuskan apakah perilaku publik ini memang diinginkan; bila tidak, tambahkan kebijakan akses/konfigurasi dan uji dampaknya pada halaman monitoring.
+`/` dan `/api/stats` tetap publik untuk mendukung halaman monitoring/wallboard. Ini adalah keputusan fungsional yang masih perlu dikonfirmasi dengan pemilik aplikasi. Jika metrik host tidak seharusnya terbuka ke jaringan, tambahkan mode monitoring privat dan uji dampaknya pada wallboard.
 
 ### P2 — Validasi runtime dan regresi fungsional belum lengkap
 
