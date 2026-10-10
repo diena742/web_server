@@ -56,85 +56,30 @@ if [ "$CURRENT_DIR" != "$INSTALL_DIR" ]; then
     chmod +x install.sh
 fi
 
-CASA_PORT_MOVED=0
-
-# --- STEP 1: Deteksi CasaOS & Geser Port ---
-if [ -f "/etc/casaos/gateway.ini" ]; then
-    echo -e "${YELLOW}[INFO] CasaOS Terdeteksi! Memeriksa konfigurasi port...${NC}"
-    
-    # Ambil port saat ini
-    CURRENT_PORT=$(grep -oP 'port\s*=\s*\K\d+' /etc/casaos/gateway.ini)
-    
-    if [ "$CURRENT_PORT" == "80" ]; then
-        echo -e "${YELLOW}[ACTION] CasaOS menggunakan Port 80. Menggeser ke Port 9999...${NC}"
-        
-        # Backup config
-        cp /etc/casaos/gateway.ini /etc/casaos/gateway.ini.bak
-        
-        # Ganti Port 80 jadi 9999 pakai sed
-        sed -i 's/port = 80/port = 9999/g' /etc/casaos/gateway.ini
-        # Kadang formatnya "port=80" tanpa spasi, handle juga
-        sed -i 's/port=80/port=9999/g' /etc/casaos/gateway.ini
-        
-        echo -e "${GREEN}[OK] Config CasaOS diperbarui.${NC}"
-        
-        # Restart CasaOS Gateway
-        echo -e "${YELLOW}[ACTION] Merestart service CasaOS...${NC}"
-        systemctl restart casaos-gateway
-        
-        CASA_PORT_MOVED=1
-        sleep 5
-    else
-        echo -e "${GREEN}[OK] CasaOS aman (Sudah berjalan di Port $CURRENT_PORT).${NC}"
-    fi
-else
-    echo -e "${BLUE}[INFO] CasaOS tidak terdeteksi. Melanjutkan instalasi normal.${NC}"
+# --- STEP 1: Port configuration (non-destructive) ---
+# Never rewrite CasaOS configuration or stop arbitrary host processes automatically.
+DASHBOARD_PORT="${DASHBOARD_PORT:-80}"
+if ! [[ "$DASHBOARD_PORT" =~ ^[0-9]+$ ]] || [ "$DASHBOARD_PORT" -lt 1 ] || [ "$DASHBOARD_PORT" -gt 65535 ]; then
+    echo -e "${RED}[ERROR] DASHBOARD_PORT harus berupa angka 1-65535.${NC}"
+    exit 1
 fi
 
-# --- STEP 2: Cek & Bersihkan Port 80 ---
-echo -e "${YELLOW}[INFO] Memastikan Port 80 tersedia...${NC}"
+if [ -f "/etc/casaos/gateway.ini" ]; then
+    echo -e "${YELLOW}[INFO] CasaOS terdeteksi. Installer tidak akan mengubah port CasaOS otomatis.${NC}"
+fi
 
-# Loop checking (Max 5 attempts)
-for i in {1..5}; do
-    if lsof -Pi :80 -sTCP:LISTEN -t >/dev/null ; then
-        PID=$(lsof -Pi :80 -sTCP:LISTEN -t)
-        PROCESS_NAME=$(ps -p $PID -o comm=)
-        
-        # Skip check if it's our own docker-proxy (re-run scenario)
-        if [ "$PROCESS_NAME" == "docker-proxy" ]; then
-             echo -e "${BLUE}[INFO] Port 80 sedang digunakan oleh Docker (Mungkin instalasi sebelumnya). Akan direstart.${NC}"
-             break
-        fi
-
-        echo -e "${RED}[WARNING] Port 80 masih digunakan oleh: $PROCESS_NAME ($PID) (Percobaan $i/5)${NC}"
-        
-        if [ "$PROCESS_NAME" == "casaos-gateway" ]; then
-             echo -e "${YELLOW}[ACTION] Memaksa restart CasaOS lagi...${NC}"
-             systemctl restart casaos-gateway
-        elif [ "$PROCESS_NAME" == "apache2" ] || [ "$PROCESS_NAME" == "nginx" ] || [ "$PROCESS_NAME" == "httpd" ]; then
-             echo -e "${YELLOW}[ACTION] Menghentikan web server bawaan ($PROCESS_NAME)...${NC}"
-             systemctl stop $PROCESS_NAME
-             systemctl disable $PROCESS_NAME
+# Detect conflicts but never kill or disable the process that owns the port.
+if command -v lsof >/dev/null 2>&1; then
+    PORT_PIDS="$(lsof -nP -iTCP:"$DASHBOARD_PORT" -sTCP:LISTEN -t 2>/dev/null || true)"
+    if [ -n "$PORT_PIDS" ]; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -Fxq 'eka_dashboard'; then
+            echo -e "${BLUE}[INFO] Container eka_dashboard sudah berjalan; melanjutkan update tanpa menghentikan proses host.${NC}"
         else
-             echo -e "${RED}[ACTION] Mematikan paksa proses $PID...${NC}"
-             kill -9 $PID
+            echo -e "${RED}[ERROR] Port $DASHBOARD_PORT sedang dipakai proses lain.${NC}"
+            echo -e "Atur port yang kosong pada file .env, misalnya DASHBOARD_PORT=8080."
+            echo -e "Installer berhenti tanpa menghentikan proses atau mengubah konfigurasi host."
+            exit 1
         fi
-        
-        sleep 3
-    else
-        echo -e "${GREEN}[OK] Port 80 Kosong & Siap digunakan.${NC}"
-        break
-    fi
-done
-
-# Final Check
-if lsof -Pi :80 -sTCP:LISTEN -t >/dev/null ; then
-    PID=$(lsof -Pi :80 -sTCP:LISTEN -t)
-    PROCESS_NAME=$(ps -p $PID -o comm=)
-    if [ "$PROCESS_NAME" != "docker-proxy" ]; then
-        echo -e "${RED}[CRITICAL ERROR] Port 80 MASIH digunakan oleh $PROCESS_NAME. Instalasi tidak bisa lanjut.${NC}"
-        echo "Mohon matikan proses tersebut manual: kill -9 $PID"
-        exit 1
     fi
 fi
 
@@ -173,18 +118,7 @@ fi
 
 echo -e "${BLUE}[INFO] Membangun dan Menjalankan Dashboard...${NC}"
 
-# Hapus paksa container lama jika ada konflik nama yang tidak terdeteksi docker-compose down
-docker rm -f eka_dashboard 2>/dev/null || true
-
-$COMPOSE_CMD down 2>/dev/null
-
-# Hapus security_config.json lama (dimiliki root) agar setup wizard muncul pada fresh install
-# File lain di data/ (catalog, dll) dibiarkan agar tidak perlu download ulang
-if [ -f "./data/security_config.json" ]; then
-    echo -e "${YELLOW}[INFO] Menghapus konfigurasi lama agar Setup Wizard aktif...${NC}"
-    rm -f ./data/security_config.json 2>/dev/null || true
-fi
-
+# Rebuild in place; preserve active services and security configuration.
 $COMPOSE_CMD up --build -d
 
 if [ $? -eq 0 ]; then
@@ -198,15 +132,10 @@ if [ $? -eq 0 ]; then
     IP_ADDR=$(hostname -I | awk '{print $1}')
     
     echo -e "Silakan akses Dashboard Admin di:"
-    echo -e "${BLUE}   http://$IP_ADDR  (Port 80) ${NC}"
-    echo ""
-    
-    if [ "$CASA_PORT_MOVED" -eq 1 ]; then
-        echo -e "${YELLOW}PERHATIAN PENTING:${NC}"
-        echo -e "Web Interface CasaOS telah dipindahkan ke:"
-        echo -e "${YELLOW}   http://$IP_ADDR:9999 ${NC}"
-        echo -e "(Bookmark link ini agar tidak lupa!)"
-    fi
+    echo -e "${BLUE}   http://$IP_ADDR:$DASHBOARD_PORT ${NC}"
+    echo -e "Jika memakai port 80, URL juga dapat dibuka tanpa menulis :80."
+    echo -e "Untuk mengubah port, atur DASHBOARD_PORT di file .env."
+
     
     echo ""
     echo -e "Terima kasih telah menggunakan produk ini."
