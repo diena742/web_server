@@ -494,7 +494,7 @@
                     </div>
                     <div class="form-row">
                         <label>New Password</label>
-                        <input type="password" id="new-password" placeholder="Enter new password">
+                        <input type="password" id="new-password" placeholder="Enter new password (12+ characters)" minlength="12">
                     </div>
                     <div class="form-row">
                         <label>Confirm Password</label>
@@ -521,7 +521,7 @@
                     </div>
                     <div class="form-row">
                         <label>Password</label>
-                        <input type="password" id="new-user-pass" placeholder="Enter password">
+                        <input type="password" id="new-user-pass" placeholder="Enter password (12+ characters)" minlength="12">
                     </div>
                     <div class="form-row">
                         <label>Role</label>
@@ -1093,8 +1093,8 @@
                 showMsg('account-msg', 'Passwords do not match', 'error');
                 return;
             }
-            if (newPass.length < 4) {
-                showMsg('account-msg', 'Password must be at least 4 characters', 'error');
+            if (newPass.length < 12) {
+                showMsg('account-msg', 'Password must be at least 12 characters', 'error');
                 return;
             }
 
