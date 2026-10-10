@@ -54,14 +54,15 @@ Branch pengembangan memiliki patch keamanan dan perbaikan fungsional, serta tes 
 ### Installer dan UI
 
 - Installer pada branch ini telah diubah agar tidak secara otomatis membunuh proses host di port 80, menghapus paksa container, mengalihkan port CasaOS, atau menghapus konfigurasi keamanan sebagaimana perilaku awalnya.
+- Endpoint pembaruan otomatis kini mendukung Docker Compose v2 dan fallback ke Compose v1, konsisten dengan pilihan yang dideteksi installer.
 - Port dashboard dapat ditetapkan lewat `DASHBOARD_PORT`; secret seharusnya ditempatkan dalam `.env` yang tidak di-commit.
-- Perubahan UI terdahulu menambahkan perilaku long-press touch pada file manager, perbaikan lifecycle ResizeObserver tab terminal, serta fallback clipboard Android. Sintaks JavaScript divalidasi oleh CI, tetapi interaksi browser sebenarnya belum diuji melalui E2E pada perangkat.
+- Perubahan UI menambahkan perilaku long-press touch pada file manager, perbaikan lifecycle ResizeObserver tab terminal, serta fallback clipboard Android. Versi query cache untuk aset file manager sudah dinaikkan agar browser tidak terus memakai JavaScript/CSS lama; editor berkas kini menampilkan kegagalan jaringan saat membaca/menyimpan. Sintaks JavaScript divalidasi oleh CI, tetapi interaksi browser sebenarnya belum diuji melalui E2E pada perangkat.
 
 ## Validasi otomatis
 
-Workflow: [Source Validation](https://github.com/diena742/web_server/actions/runs/38049077495)
+Workflow: [Source Validation](https://github.com/diena742/web_server/actions/runs/38049263548)
 
-Hasil commit `8992f668ff03e41a452ef83a19167631b7e281bb`:
+Hasil commit `1870c179ee0b24c832211022183b9a2423cf3372`:
 
 - Kompilasi sumber Python: sukses.
 - Instalasi dependensi: sukses.
