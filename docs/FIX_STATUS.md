@@ -1,68 +1,99 @@
-# Status Perbaikan dan Kriteria PR
+# Status Audit, Perbaikan, dan Kesiapan Pull Request
 
 Tanggal pembaruan: 2026-10-10  
-Repositori kerja: [diena742/web_server](https://github.com/diena742/web_server)  
-Branch: `fix/critical-bugs`  
+Repositori pengembangan: [diena742/web_server](https://github.com/diena742/web_server)  
+Branch pengembangan: `fix/critical-bugs`  
 Sumber upstream: [recode-project/web_server](https://github.com/recode-project/web_server)
 
-## Status saat ini
+## Ringkasan
 
-Branch ini sudah mempunyai patch hardening pertama dan tes regresi otomatis. Ini belum berarti semua bug proyek sudah selesai, dan belum dianggap siap untuk PR final sampai blocker residual di bawah ditangani atau dibatasi secara eksplisit.
+Branch pengembangan memiliki patch keamanan dan perbaikan fungsional, serta tes regresi otomatis. CI terakhir yang telah diverifikasi berhasil pada commit `dec10014c9e72a5602c9cf12c2889606e1b631ac`.
 
-### Perbaikan yang sudah diterapkan
+**Status: belum siap untuk klaim bahwa semua bug terselesaikan atau untuk menyatakan aman dipaparkan ke internet.** CI memvalidasi sintaks dan unit/regression tests, tetapi belum menggantikan uji runtime Docker, browser E2E, dan pengujian pada target Armbian/STB. Risiko arsitektur container berprivilege luas dan backend duplikat juga masih perlu ditangani atau secara eksplisit dibatasi sebelum PR final.
 
-- Menghapus header `X-Mobile-Key` hard-coded sebagai bypass autentikasi global. Token mobile sekarang hanya diterima oleh endpoint `/api/mobile-backup/*`, melalui environment `MOBILE_ACCESS_TOKEN`.
-- Memberikan pemeriksaan sesi dan role pada event Socket.IO terminal, memisahkan PTY per socket, mengirim output hanya ke socket pemilik, membatasi ukuran input/resize, dan membersihkan terminal saat disconnect.
-- Memasang autentikasi/RBAC pada sejumlah API sistem, Docker, LXD, konfigurasi keamanan, log container, dan aksi host yang sebelumnya tidak konsisten dilindungi.
-- Membatasi read-only file browser ke direktori yang secara eksplisit dikonfigurasi melalui `FILES_READONLY_ROOTS`. Owner/admin tetap mempunyai akses file host penuh sesuai rancangan aplikasi.
-- Menambahkan pemeriksaan batas path dan memakai path kanonis pada operasi Mobile Backup; membatasi upload agar nama file aman dan file yang ada tidak tertimpa tanpa sengaja.
-- Mengganti hash password baru menjadi Werkzeug PBKDF2, dengan verifikasi dan migrasi saat login sukses untuk hash SHA-256 lama.
-- Menaikkan persyaratan panjang password baru menjadi minimum 12 karakter pada backend dan form terkait.
-- Membatasi CORS/Socket.IO pada same-origin secara default, menambahkan konfigurasi allowlist origin, dan mengatur cookie sesi.
-- Mengubah installer agar tidak otomatis mematikan proses host, memindahkan port CasaOS, menghapus container secara paksa, atau menghapus konfigurasi keamanan saat update. Port dashboard dapat dipilih melalui `DASHBOARD_PORT`; secret sesi disimpan di `.env`.
-- Memperbarui panduan instalasi serta menambah workflow CI.
+## Perbaikan yang diterapkan pada branch
+
+### Autentikasi dan otorisasi
+
+- Menghapus penggunaan header `X-Mobile-Key` yang tertanam di source sebagai bypass autentikasi global. Token `MOBILE_ACCESS_TOKEN` hanya berlaku pada endpoint `/api/mobile-backup/*`.
+- Ketika autentikasi global dinonaktifkan, sesi monitoring tidak lagi otomatis memperoleh role admin; role fallback menjadi `readonly`.
+- Memperketat RBAC pada API jaringan, storage, SMB, VPN/WireGuard, ZeroTier, app store, LXD, Docker overview, website monitor, database monitor, backup, serta aksi administrasi host.
+- Endpoint konfigurasi client VPN yang dapat mengembalikan konfigurasi WireGuard hanya dapat diakses admin.
+- Halaman Mobile Backup dan API monitoring sensitif dibatasi untuk admin. API mobile backup yang memakai token tetap menerima token hanya dalam ruang lingkup endpoint tersebut.
+- Memperbaiki hierarki izin: role `limited` memiliki akses `view` yang sesuai, tetapi tidak mendapatkan hak `full`.
+- Endpoint kontrol systemd menolak layanan yang tidak terdaftar dalam allowlist; operator hanya boleh melakukan `restart` pada layanan yang dikonfigurasi. Kegagalan `systemctl` tidak lagi dilaporkan sebagai sukses.
+- First-run setup membutuhkan `SETUP_TOKEN`. Hash password baru menggunakan Werkzeug PBKDF2, dengan migrasi saat login sukses untuk hash SHA-256 lama; form/backend memberlakukan password minimum 12 karakter.
+- CORS/Socket.IO same-origin secara default, dengan origin allowlist dan pengaturan cookie sesi.
+
+### File manager, terminal, dan operasi host
+
+- Menambahkan pengecekan sesi/role pada event Socket.IO terminal, pemisahan sesi PTY, pengiriman output ke socket pemilik, pembatasan ukuran event input/resize, dan pembersihan terminal saat disconnect.
+- File browser read-only dibatasi ke root eksplisit dari `FILES_READONLY_ROOTS`; akses penuh owner/admin tetap sangat kuat karena aplikasi memang memasang filesystem host.
+- Operasi Mobile Backup memeriksa batas path kanonis. Rename, move, dan copy menolak konflik tujuan yang sudah ada, serta menolak operasi menyalin/memindahkan direktori ke dalam dirinya sendiri.
+- Endpoint daftar Mobile Backup tidak lagi membuat subdirektori sembarang saat GET, dan mengabaikan entry symlink.
+- Upload Mobile Backup menolak nama yang tidak valid serta menolak file tujuan yang sudah ada.
+- Deteksi IP LAN/Tailscale tidak menggunakan alamat contoh yang tertanam di source; alamat dideteksi dari network namespace host atau diberikan melalui environment/config yang tervalidasi.
+- Endpoint kontrol service dan pembacaan analisis disk memakai validasi input/allowlist serta argumen subprocess terpisah. Endpoint analisis disk/storage dibatasi untuk admin.
+- Endpoint update menggunakan direktori kerja absolut yang tervalidasi, quoting untuk perintah di shell bagian dalam, dan argv luar dengan `shell=False`. Pembacaan model CPU tidak lagi memanggil shell.
+- Endpoint `/api/network-details` dibatasi untuk admin.
+
+### Backup, restore, dan website monitor
+
+- Pembuatan backup memakai lokasi canonical `APP_SETTINGS_FILE` dan `SECURITY_CONFIG_FILE`, bukan nama/lokasi lama.
+- Restore hanya memproses file regular yang namanya masuk allowlist, menulis ke lokasi canonical lewat file sementara dan penggantian atomik, dan tidak mengekstrak entri symlink/hardlink.
+- Download arsip backup dibatasi untuk admin.
+- Domain website dinormalisasi dan divalidasi sebagai hostname sebelum disimpan.
+- ZIP backup website dibatasi agar tetap di bawah web root, melewati symlink, menggunakan nama file sementara unik, dan menghapus arsip sementara sesudah respons ditutup.
+- API web monitor yang membaca log/keadaan host dibatasi untuk admin.
+
+### Installer dan UI
+
+- Installer pada branch ini telah diubah agar tidak secara otomatis membunuh proses host di port 80, menghapus paksa container, mengalihkan port CasaOS, atau menghapus konfigurasi keamanan sebagaimana perilaku awalnya.
+- Port dashboard dapat ditetapkan lewat `DASHBOARD_PORT`; secret seharusnya ditempatkan dalam `.env` yang tidak di-commit.
+- Perubahan UI terdahulu menambahkan perilaku long-press touch pada file manager, perbaikan lifecycle ResizeObserver tab terminal, serta fallback clipboard Android. Sintaks JavaScript divalidasi oleh CI, tetapi interaksi browser sebenarnya belum diuji melalui E2E pada perangkat.
 
 ## Validasi otomatis
 
-Workflow `.github/workflows/source-validation.yml` menjalankan kompilasi Python, instalasi dependensi, unit/regression tests, pengecekan sintaks JavaScript dan pengecekan sintaks shell. Run terakhir yang sudah selesai dan diverifikasi sebelum pembaruan dokumentasi ini melaporkan sukses. Cek halaman Actions untuk hasil dari commit paling baru sebelum membuat PR.
+Workflow: [Source Validation](https://github.com/diena742/web_server/actions/runs/38048784663)
 
-Saat ini terdapat 17 tes regresi yang meliputi hash password, first-run setup/login, token setup yang benar/salah/tidak tersedia, autentikasi endpoint file/LXD/mobile, terminal anonim, CORS, batas direktori read-only, redaksi secret, hak akses log Docker, dan perubahan password milik pengguna.
+Hasil commit `dec10014c9e72a5602c9cf12c2889606e1b631ac`:
 
-## Blocker / risiko yang belum selesai
+- Kompilasi sumber Python: sukses.
+- Instalasi dependensi: sukses.
+- Unit/regression tests: **44 tes lulus**.
+- Validasi sintaks `static/script.js` dan `static/files.js`: sukses.
+- Validasi sintaks `install.sh` dan `setup_wg.sh`: sukses.
 
-### P0 — Arsitektur container mempunyai akses host yang sangat luas
+CI ini tidak menjalankan install/upgrade Docker Compose secara nyata, browser end-to-end, atau uji perangkat STB. Hasil CI hijau adalah bukti untuk tes yang dijalankan—bukan bukti bahwa seluruh fungsi aplikasi bebas bug.
 
-`docker-compose.yml` masih menggunakan `privileged: true`, `pid: host`, Docker socket host, D-Bus system bus socket, mount root filesystem host ke `/host/root`, dan akses konfigurasi WireGuard. RBAC aplikasi mengurangi paparan endpoint, tetapi tidak menghilangkan dampak kompromi proses web. Menghapus akses tersebut tanpa pengganti kemungkinan merusak fitur terminal, manajemen Docker/LXD, file manager, jaringan, dan layanan host.
+## Risiko dan blocker yang belum terselesaikan
 
-**Sebelum PR final:** buat matriks fitur host yang benar-benar dibutuhkan, tentukan model threat, lalu pecah operasi privileged ke helper host dengan API sempit jika memungkinkan. Jika refactor penuh di luar cakupan, PR harus menyatakan risiko ini secara eksplisit dan tidak boleh mengklaim dashboard sudah aman untuk dipaparkan ke internet.
+### P0 — Container memiliki akses host yang sangat luas
 
-### P1 — Backend duplikat belum diaudit penuh
+`docker-compose.yml` masih menggunakan `privileged: true`, `pid: host`, Docker socket host, D-Bus system bus socket, bind mount root host ke `/host/root`, serta mount konfigurasi WireGuard. Bila proses web berhasil dikompromikan, RBAC aplikasi tidak mencegah dampak luas dari akses ini.
 
-`Dockerfile` menjalankan `app:app` dari `app.py`. `app_server.py` masih ada sebagai backend duplikat dan belum menerima patch fungsional yang sama. Verifikasi apakah file tersebut masih didukung; jika tidak, dokumentasikan/depresiasikan. Jika didukung, terapkan hardening setara dan tambahkan tes untuk kedua backend.
+**Sebelum merekomendasikan deployment terbuka ke internet:** buat matriks fitur yang benar-benar membutuhkan akses host, lakukan threat modeling, dan evaluasi helper host dengan API terbatas / least privilege. Menghapus semua mount/privilege tanpa desain pengganti berpotensi merusak terminal, file manager, Docker/LXD, jaringan, dan pengelolaan layanan. Sampai masalah ini diselesaikan, jangan mengklaim aplikasi aman untuk dipaparkan ke internet.
 
-### Status perbaikan route duplikat
+### P1 — Backend duplikat belum diselaraskan
 
-Handler `/files` dan `/terminal` kini dikonsolidasikan ke satu implementasi berizin, dengan alias endpoint lama dipertahankan untuk `url_for`. Definisi duplikat `/api/store/manage` juga menggunakan satu handler kanonis dengan alias endpoint, sehingga implementasi kedua yang sebelumnya dibayangi telah dihapus. Tetap uji alur UI store dan file manager secara runtime sebelum PR final.
+Dockerfile saat ini menjalankan `app:app` dari `app.py`. `app_server.py` masih merupakan backend duplikat yang belum menerima hardening fungsional yang sama. Konfirmasikan apakah file itu masih didukung. Jika masih dipakai, terapkan patch sepadan dan tes terhadap kedua entry point; jika tidak, dokumentasikan status/depresiasinya sebelum PR final.
 
-### Setup awal dan endpoint monitoring publik
+### P2 — Pengujian runtime dan daftar bug fungsional
 
-Pembuatan owner pertama kini memerlukan `SETUP_TOKEN` yang dihasilkan dan dipertahankan installer dalam file privat `/root/eka_dashboard/.env`. Endpoint setup menolak token hilang/salah dan tidak lagi dapat dibuka ulang melalui `session['setup_mode']`; tes regresi untuk kasus token salah/benar/tidak ada telah ditambahkan.
+- Jalankan instalasi bersih dan upgrade pada mesin uji terisolasi, bukan server produksi.
+- Jalankan browser E2E untuk login/setup, editor file, upload/download/rename/copy/paste, terminal multi-tab dan clipboard Android, file manager touch, backup/restore, serta Docker/LXD/layanan host.
+- Uji pada lingkungan target yang benar-benar akan dipakai, termasuk Armbian/STB. Belum ada bukti dari CI saat ini bahwa seluruh operasi host berhasil pada perangkat tersebut.
+- Review ulang API publik `/` dan `/api/stats`; keduanya masih publik untuk kebutuhan monitoring/wallboard. Pastikan ini merupakan keputusan yang disengaja.
+- Tinjau kembali visibility tombol di UI berdasarkan role. Walau backend menolak permintaan yang tidak berizin, tombol operasi yang masih tampil bagi role read-only dapat membingungkan pengguna.
+- Periksa konfigurasi upload dengan race/symlink test dan uji error handling pada file system read-only/penuh.
+- Branch saat ini mempunyai 83 commit di atas branch `main` fork, sehingga riwayat pengembangan cukup panjang. Sebelum PR upstream, tinjau daftar file/diff lengkap dan pertimbangkan squash pada sisi PR agar review lebih terarah.
 
-`/` dan `/api/stats` tetap publik untuk mendukung halaman monitoring/wallboard. Ini adalah keputusan fungsional yang masih perlu dikonfirmasi dengan pemilik aplikasi. Jika metrik host tidak seharusnya terbuka ke jaringan, tambahkan mode monitoring privat dan uji dampaknya pada wallboard.
+## Gerbang sebelum Pull Request upstream
 
-### P2 — Validasi runtime dan regresi fungsional belum lengkap
+1. Tuntaskan atau dokumentasikan dengan jelas blocker residual di atas.
+2. Pastikan Actions hijau untuk commit terbaru setelah setiap patch baru.
+3. Jalankan tes runtime/E2E terisolasi dan regresi perangkat yang relevan.
+4. Isi PR dengan langkah reproduksi setiap bug, dampak, file yang diperbaiki, hasil tes, perubahan perilaku, dan risiko yang belum ditangani.
+5. Ajukan PR dari `diena742/web_server:fix/critical-bugs` ke branch utama upstream. Jangan melakukan push langsung ke upstream; maintainer yang memutuskan apakah perubahan diterima/digabungkan.
 
-- CI memvalidasi sintaks dan unit/regression tests, tetapi belum menjalankan browser E2E, menjalankan Docker Compose di lingkungan terisolasi, atau menguji operasi nyata pada Armbian/STB.
-- File manager owner/admin sengaja masih dapat menjangkau filesystem host. Mount root-host membuat kemampuan itu sangat kuat; UI path validation saja bukan boundary keamanan.
-- Installer belum diuji melalui instalasi bersih dan upgrade pada mesin uji. Jangan jalankan pada server produksi sebelum uji tersebut dilakukan.
-- UI/responsivitas editor file, clipboard terminal Android, dan bug fungsional yang ditemukan saat penggunaan masih perlu daftar reproduksi dan pengujian terpisah.
-
-## Kriteria sebelum membuat PR upstream
-
-1. Periksa semua temuan di atas dan tentukan blocker yang harus diselesaikan versus keterbatasan yang diterima secara sadar.
-2. Pastikan CI hijau pada commit terbaru, bukan sekadar pada commit sebelumnya.
-3. Jalankan tes runtime terisolasi untuk autentikasi, file manager, terminal, Docker/LXD, installer, serta pengalaman UI utama.
-4. Tulis PR dengan langkah reproduksi bug, dampak, patch, hasil tes, perubahan perilaku, dan risiko residual.
-5. Jangan menulis langsung ke upstream. Ajukan Pull Request dari `diena742/web_server:fix/critical-bugs` ke branch utama upstream setelah perubahan siap ditinjau.
-
-Dokumen ini membedakan perbaikan yang sudah ada dari risiko yang belum dituntaskan; jangan menggunakan status “semua bug selesai” sebelum blocker di atas diperiksa dan tes runtime dilakukan.
+Dokumen ini sengaja membedakan perbaikan yang telah diterapkan dari risiko yang masih ada. Jangan menyatakan “semua bug selesai” hanya berdasarkan hasil CI hijau.
