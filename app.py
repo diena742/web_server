@@ -608,6 +608,7 @@ def login_api():
     return jsonify({'error': 'Invalid credentials'}), 401
 
 @app.route('/api/auth/logout', methods=['POST'])
+@login_required
 def logout_api():
     user = session.get('username', 'unknown')
     session_id = session.get('session_id')
@@ -737,10 +738,12 @@ def stats():
     })
 
 @app.route('/metrics')
+@login_required
 def metrics_page():
     return render_template('metrics.html')
 
 @app.route('/api/metrics')
+@login_required
 def metrics_api():
     """Comprehensive metrics for the Metrics page"""
     
@@ -873,6 +876,7 @@ def metrics_api():
     })
 
 @app.route('/api/processes')
+@login_required
 def processes():
     # Get all running processes
     procs = []
@@ -896,6 +900,7 @@ def processes():
     return jsonify(procs[:50]) # Return top 50 to avoid overhead
 
 @app.route('/api/disk-analysis')
+@login_required
 def disk_analysis():
     def get_du(path):
         try:
@@ -941,6 +946,7 @@ def disk_analysis():
     })
 
 @app.route('/api/network-ports')
+@login_required
 def network_ports():
     connections = []
     try:
@@ -994,6 +1000,7 @@ def network_ports():
     return jsonify(connections)
 
 @app.route('/api/network-details')
+@login_required
 def network_details():
     interfaces = []
     addrs = psutil.net_if_addrs()
@@ -1019,6 +1026,7 @@ def network_details():
     return jsonify(interfaces)
 
 @app.route('/api/system')
+@login_required
 def system_info():
     uname = platform.uname()
     
@@ -1506,6 +1514,7 @@ def docker_container_stats(container_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/docker/<container_id>/action', methods=['POST'])
+@requires_permission('docker', 'full')
 def docker_action(container_id):
     try:
         data = request.json
@@ -1530,6 +1539,7 @@ def docker_action(container_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/docker/<container_id>/logs')
+@requires_permission('docker', 'view')
 def docker_logs(container_id):
     try:
         lines = request.args.get('lines', 200, type=int)
@@ -1544,12 +1554,12 @@ def docker_logs(container_id):
 
 # --- SECURITY ROUTES ---
 @app.route('/security')
-@login_required
+@requires_permission('security', 'view')
 def security_page():
     return render_template('security.html')
 
 @app.route('/api/security/config')
-@login_required
+@requires_permission('security', 'view')
 def get_security_config():
     config = load_security_config()
     # Don't send password hashes to frontend
@@ -1566,7 +1576,7 @@ def get_security_config():
     return jsonify(safe_config)
 
 @app.route('/api/security/config', methods=['POST'])
-@login_required
+@requires_permission('security', 'full')
 def update_security_config():
     config = load_security_config()
     data = request.json
@@ -1735,7 +1745,7 @@ def delete_user(username):
     return jsonify({'success': True})
 
 @app.route('/api/security/audit-logs')
-@login_required
+@requires_permission('audit_logs', 'view')
 def get_audit_logs():
     try:
         lines = request.args.get('lines', 100, type=int)
@@ -1775,6 +1785,7 @@ def session_heartbeat():
     return jsonify({'success': True, 'timestamp': time.time()})
 
 @app.route('/api/security/logout-beacon', methods=['POST'])
+@login_required
 def logout_beacon():
     """Called by browser on tab close/unload to logout"""
     if session.get('logged_in'):
@@ -1826,6 +1837,7 @@ def settings_page():
     return render_template('settings.html')
 
 @app.route('/api/monitoring/config')
+@login_required
 def get_monitoring_config():
     """Public endpoint for monitoring board configuration"""
     settings = load_app_settings()
@@ -1902,11 +1914,13 @@ def files():
     return render_template('files.html', current_path=path)
 
 @app.route('/face')
+@login_required
 def face_ui():
     """Eilik-style Robot Face Interface"""
     return render_template('face.html')
 
 @app.route('/api/face-stats')
+@login_required
 def face_stats_api():
     """Public API for Face UI (No Login Required)"""
     try:
@@ -2305,13 +2319,14 @@ def init_mqtt_client():
         print(f"MQTT Init Error: {e}")
 
 @app.route('/api/home/status')
+@login_required
 def home_status():
     """Get current state of home devices"""
     # Force refresh/check timeout logic if needed, but returning dict is fast
     return jsonify(HOME_DEVICES_STATE)
 
 @app.route('/api/home/control', methods=['POST'])
-@login_required
+@admin_required
 def home_control():
     """Control a device via MQTT"""
     if not mqtt_client:
@@ -4385,6 +4400,7 @@ def get_installed_apps_dashboard():
     return [] # Placeholder, will be populated in route
 
 @app.route('/api/dashboard/apps', methods=['GET'])
+@login_required
 def get_dashboard_apps():
     # 1. Get System Apps
     all_items = SYSTEM_APPS.copy()
@@ -4952,7 +4968,7 @@ def files_upload_endpoint():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/files/download', methods=['GET'])
-@login_required
+@requires_permission('files', 'read')
 def files_download_endpoint():
     """Download file"""
     try:
@@ -5766,7 +5782,7 @@ def panel_docker_containers():
     return jsonify({'containers': containers_data})
 
 @app.route('/api/panel_docker/action', methods=['POST'])
-@login_required
+@requires_permission('docker', 'full')
 def panel_docker_action():
     """Start/Stop/Restart Docker container"""
     data = request.json
