@@ -827,13 +827,13 @@ class MobileBackupSafetyTests(unittest.TestCase):
         import tempfile
         route = type("CommandResult", (), {
             "returncode": 0,
-            "stdout": "default via 192.168.1.1 dev eth0 proto dhcp\\n",
+            "stdout": "default via 192.168.1.1 dev eth0 proto dhcp\n",
         })()
         addresses = type("CommandResult", (), {
             "returncode": 0,
             "stdout": (
-                "2: eth0    inet 192.168.1.50/24 brd 192.168.1.255 scope global eth0\\n"
-                "5: tailscale0    inet 100.100.1.2/32 scope global tailscale0\\n"
+                "2: eth0    inet 192.168.1.50/24 brd 192.168.1.255 scope global eth0\n"
+                "5: tailscale0    inet 100.100.1.2/32 scope global tailscale0\n"
             ),
         })()
         with tempfile.TemporaryDirectory() as temporary:
