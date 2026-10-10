@@ -5153,6 +5153,7 @@ def mobile_backup_rename():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mobile-backup/move', methods=['POST'])
+@mobile_backup_auth_required
 def mobile_backup_move():
     """Pindah file atau folder (Cut & Paste)"""
     data = request.get_json()
@@ -5177,6 +5178,7 @@ def mobile_backup_move():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mobile-backup/copy', methods=['POST'])
+@mobile_backup_auth_required
 def mobile_backup_copy():
     """Salin file atau folder (Copy & Paste)"""
     data = request.get_json()
@@ -5275,6 +5277,7 @@ def mobile_backup_delete():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mobile-backup/upload', methods=['POST'])
+@mobile_backup_auth_required
 def mobile_backup_upload():
     """API endpoint untuk menerima file dari aplikasi Android"""
     if 'file' not in request.files:
