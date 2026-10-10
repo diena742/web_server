@@ -64,8 +64,8 @@ Jika melakukan instalasi manual tanpa `install.sh`, buat token sebelum menyalaka
 ```bash
 umask 077
 touch .env
-printf 'SETUP_TOKEN=%s\\n' "$(openssl rand -hex 32)" >> .env
-printf 'SECRET_KEY=%s\\n' "$(openssl rand -hex 32)" >> .env
+printf 'SETUP_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+printf 'SECRET_KEY=%s\n' "$(openssl rand -hex 32)" >> .env
 chmod 600 .env
 sudo docker compose up --build -d
 ```
