@@ -3262,11 +3262,10 @@ def resolve_backup_path(backup_id):
 @app.route('/api/backup/list')
 @admin_required
 def list_backups():
-    """Mendapatkan daftar backup yang tersedia"""
+    """List backup archives without following symlinks."""
     try:
         backups = []
-        
-        if os.path.exists(BACKUP_DIR):
+        if os.path.isdir(BACKUP_DIR):
             for filename in os.listdir(BACKUP_DIR):
                 if not filename.endswith('.tar.gz'):
                     continue
@@ -3274,32 +3273,30 @@ def list_backups():
                 if os.path.islink(filepath) or not os.path.isfile(filepath):
                     continue
                 stat = os.stat(filepath)
-                    
-                    # Parse nama dan tanggal dari filename
-                    # Format: backup_YYYY-MM-DD_HH-MM-SS_nama.tar.gz
-                    parts = filename.replace('.tar.gz', '').split('_')
-                    if len(parts) >= 3:
-                        date_str = f"{parts[1]} {parts[2].replace('-', ':')}"
-                        name = '_'.join(parts[3:]) if len(parts) > 3 else 'Backup'
-                    else:
-                        date_str = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
-                        name = filename.replace('.tar.gz', '')
-                    
-                    backups.append({
-                        'id': filename,
-                        'name': name or 'Backup',
-                        'filename': filename,
-                        'date': date_str,
-                        'size': format_bytes(stat.st_size),
-                        'timestamp': stat.st_mtime
-                    })
-        
-        # Urutkan dari terbaru
-        backups.sort(key=lambda x: x['timestamp'], reverse=True)
-        
+
+                # Parse name and date from generated backup filenames.
+                parts = filename.replace('.tar.gz', '').split('_')
+                if len(parts) >= 3:
+                    date_str = f"{parts[1]} {parts[2].replace('-', ':')}"
+                    name = '_'.join(parts[3:]) if len(parts) > 3 else 'Backup'
+                else:
+                    date_str = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+                    name = filename.replace('.tar.gz', '')
+
+                backups.append({
+                    'id': filename,
+                    'name': name or 'Backup',
+                    'filename': filename,
+                    'date': date_str,
+                    'size': format_bytes(stat.st_size),
+                    'timestamp': stat.st_mtime
+                })
+
+        backups.sort(key=lambda item: item['timestamp'], reverse=True)
         return jsonify({'backups': backups})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        return jsonify({'error': 'Unable to list backup archives'}), 500
+
 
 @app.route('/api/backup/create', methods=['POST'])
 @login_required
