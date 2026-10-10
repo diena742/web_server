@@ -592,5 +592,34 @@ class HostCommandSafetyTests(unittest.TestCase):
         run_command.assert_not_called()
 
 
+
+class PermissionHierarchyTests(unittest.TestCase):
+    def test_limited_permission_includes_view_but_not_full_control(self):
+        self.assertTrue(dashboard.has_permission("operator", "services", "view"))
+        self.assertTrue(dashboard.has_permission("operator", "services", "limited"))
+        self.assertFalse(dashboard.has_permission("operator", "services", "full"))
+
+    def test_operator_can_view_configured_service_status(self):
+        dashboard.app.testing = True
+        client = dashboard.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "operator-user",
+                "role": "operator",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+        config = {"require_auth": True, "session_timeout": 3600}
+        result = type("CommandResult", (), {"stdout": "active\\n", "returncode": 0})()
+        with patch.object(dashboard, "load_security_config", return_value=config), \
+             patch.object(dashboard, "load_app_settings", return_value={"services": [{"id": "ssh", "name": "SSH Server"}]}), \
+             patch.object(dashboard, "run_host_command", return_value=result) as run_command:
+            response = client.get("/api/services/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["services"][0]["status_text"], "Running")
+        run_command.assert_called_once_with(["systemctl", "is-active", "ssh"])
+
+
 if __name__ == "__main__":
     unittest.main()
