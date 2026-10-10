@@ -2779,7 +2779,12 @@ def perform_update():
         # shell=True to assemble the outer command from container metadata.
         update_cmd = (
             f"cd {shlex.quote(working_dir)} && "
-            "git pull origin main && docker compose up --build -d"
+            "git pull origin main && "
+            "if docker compose version >/dev/null 2>&1; then "
+            "docker compose up --build -d; "
+            "elif command -v docker-compose >/dev/null 2>&1; then "
+            "docker-compose up --build -d; "
+            "else echo 'Docker Compose not found' >&2; exit 127; fi"
         )
         nsenter_cmd = [
             'nsenter', '-m', '-u', '-i', '-n', '-p', '-t', '1',
