@@ -426,6 +426,144 @@
             gap: 1rem;
             justify-content: flex-end;
         }
+    
+        .clipboard-status {
+            color: #8b949e;
+            font-size: 0.75rem;
+            min-width: 0;
+        }
+
+        .terminal-help {
+            margin-left: auto;
+            color: #666;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                overflow: hidden;
+                min-height: 100dvh;
+            }
+
+            .container {
+                height: 100dvh;
+                min-height: 0;
+                padding: 0.4rem;
+                gap: 0.45rem;
+            }
+
+            .header {
+                flex-wrap: wrap;
+                gap: 0.45rem;
+                padding: 0.55rem;
+                border-radius: 10px;
+            }
+
+            .header h2 {
+                font-size: 0.9rem !important;
+            }
+
+            .header > .tabs {
+                order: 5;
+                flex: 1 1 100%;
+                width: 100%;
+                min-width: 0;
+                padding: 0.15rem 0;
+            }
+
+            .tab {
+                min-height: 40px;
+                padding: 0.45rem 0.55rem;
+            }
+
+            .header .btn,
+            .settings-bar .btn {
+                min-height: 42px;
+                padding: 0.45rem 0.65rem;
+            }
+
+            .quick-commands {
+                max-height: 22dvh;
+                min-height: 0;
+                overflow: auto;
+                padding: 0.4rem;
+                gap: 0.35rem;
+                border-radius: 10px;
+            }
+
+            .cmd-category {
+                flex-wrap: wrap;
+                gap: 0.25rem;
+                min-width: 0;
+            }
+
+            .cmd-category-label {
+                font-size: 0.7rem;
+                padding: 0.3rem 0.45rem;
+            }
+
+            .quick-btn {
+                min-height: 36px;
+                padding: 0.4rem 0.5rem;
+                font-size: 0.72rem;
+            }
+
+            .terminal-container {
+                flex: 1 1 auto;
+                min-height: 120px;
+                border-radius: 10px;
+            }
+
+            .terminal-container::before {
+                height: 30px;
+                font-size: 0.62rem;
+                letter-spacing: 0.8px;
+            }
+
+            .terminal-container::after {
+                top: 10px;
+                left: 10px;
+                width: 9px;
+                height: 9px;
+                box-shadow: 16px 0 0 #ffbd2e, 32px 0 0 #27c93f;
+            }
+
+            .terminal-wrap {
+                min-height: 0;
+                padding: 0.4rem;
+            }
+
+            .terminal-wrap .xterm {
+                height: 100%;
+                min-height: 0;
+                touch-action: pan-y;
+            }
+
+            .settings-bar {
+                flex-wrap: wrap;
+                gap: 0.45rem;
+                padding: 0.45rem;
+                border-radius: 10px;
+                font-size: 0.75rem;
+            }
+
+            .settings-bar label {
+                gap: 0.25rem;
+            }
+
+            .settings-bar select {
+                min-height: 36px;
+            }
+
+            .terminal-help {
+                display: none;
+            }
+
+            .clipboard-status {
+                flex: 1 1 100%;
+                font-size: 0.7rem;
+            }
+        }
+
     </style>
 </head>
 
@@ -527,7 +665,14 @@
                 <input type="checkbox" id="read-only" onchange="toggleReadOnly(this.checked)"> Read-Only
             </label>
             <span id="readonly-badge" class="readonly-badge" style="display:none">READ-ONLY</span>
-            <span style="margin-left:auto; color:#666">Ctrl+C to interrupt • Double-click tab to rename</span>
+            <button class="btn clipboard-btn" type="button" onclick="pasteFromClipboard()" title="Paste clipboard text into the active terminal">
+                <i class="fa-solid fa-paste"></i> Paste
+            </button>
+            <button class="btn clipboard-btn" type="button" onclick="copyTerminalSelection()" title="Copy selected terminal text">
+                <i class="fa-solid fa-copy"></i> Copy selection
+            </button>
+            <span id="clipboard-status" class="clipboard-status" aria-live="polite"></span>
+            <span class="terminal-help">Ctrl+C to interrupt • Double-click tab to rename</span>
         </div>
     </div>
 
@@ -726,6 +871,68 @@ Restart App=systemctl restart myapp"></textarea>
                     input: cmd + '\n'
                 });
             }
+        }
+
+        function setClipboardStatus(message) {
+            const element = document.getElementById('clipboard-status');
+            if (element) element.textContent = message;
+        }
+
+        async function pasteFromClipboard() {
+            if (isReadOnly) {
+                setClipboardStatus('Terminal is read-only.');
+                return;
+            }
+            if (!activeTab || !terminals[activeTab]) {
+                setClipboardStatus('Open a terminal first.');
+                return;
+            }
+
+            let text = null;
+            if (window.isSecureContext && navigator.clipboard?.readText) {
+                try {
+                    text = await navigator.clipboard.readText();
+                } catch (error) {
+                    // The browser may block clipboard permission; offer a
+                    // pasteable input fallback that also works over plain HTTP.
+                }
+            }
+            if (text === null) {
+                text = window.prompt('Paste text for the active terminal:', '');
+            }
+            if (text === null || text.length === 0) return;
+            if (text.length > 1000000) {
+                setClipboardStatus('Paste was rejected: text exceeds 1 MB.');
+                return;
+            }
+
+            terminals[activeTab].term.paste(text);
+            terminals[activeTab].term.focus();
+            setClipboardStatus('Pasted text into terminal.');
+        }
+
+        async function copyTerminalSelection() {
+            if (!activeTab || !terminals[activeTab]) {
+                setClipboardStatus('Open a terminal first.');
+                return;
+            }
+            const selection = terminals[activeTab].term.getSelection();
+            if (!selection) {
+                setClipboardStatus('Select terminal text first.');
+                return;
+            }
+
+            if (window.isSecureContext && navigator.clipboard?.writeText) {
+                try {
+                    await navigator.clipboard.writeText(selection);
+                    setClipboardStatus('Selection copied.');
+                    return;
+                } catch (error) {
+                    // Fall back to a prompt for browsers that deny clipboard access.
+                }
+            }
+            window.prompt('Copy the selected terminal text:', selection);
+            setClipboardStatus('Use the prompt field to copy the selection.');
         }
 
         function changeFontSize(size) {
