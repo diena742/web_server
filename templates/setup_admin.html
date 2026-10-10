@@ -86,12 +86,12 @@
 <body>
     <div class="card">
         <h2>Welcome! 👋</h2>
-        <p>Please create your administrator account to secure this dashboard.</p>
+        <p>Please create your administrator account to secure this dashboard. Use a password with at least 12 characters.</p>
 
         <form id="setupForm">
             <input type="text" id="username" placeholder="Username (e.g. admin)" required>
-            <input type="password" id="password" placeholder="New Password" required minlength="4">
-            <input type="password" id="confirm_password" placeholder="Confirm Password" required minlength="4">
+            <input type="password" id="password" placeholder="New Password (12+ characters)" required minlength="12">
+            <input type="password" id="confirm_password" placeholder="Confirm Password" required minlength="12">
             <button type="submit" id="btn-submit">Create Account & Login</button>
             <div class="error" id="error-msg"></div>
         </form>
