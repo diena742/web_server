@@ -5198,7 +5198,7 @@ def mobile_backup_mkdir():
     real_base = os.path.realpath(BACKUP_BASE_DIR)
     if not is_within_base(real_parent, real_base):
         return jsonify({"error": "Akses ditolak"}), 403
-    new_dir = os.path.join(parent, name)
+    new_dir = os.path.join(real_parent, name)
     try:
         os.makedirs(new_dir, exist_ok=True)
         return jsonify({"success": True, "path": new_dir})
@@ -5218,9 +5218,9 @@ def mobile_backup_rename():
     real_base = os.path.realpath(BACKUP_BASE_DIR)
     if not is_within_base(real_old, real_base) or real_old == real_base:
         return jsonify({"error": "Akses ditolak"}), 403
-    new_path = os.path.join(os.path.dirname(old_path), new_name)
+    new_path = os.path.join(os.path.dirname(real_old), new_name)
     try:
-        os.rename(old_path, new_path)
+        os.rename(real_old, new_path)
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -5245,8 +5245,8 @@ def mobile_backup_move():
         
     try:
         import shutil
-        dest = os.path.join(dest_dir, os.path.basename(src))
-        shutil.move(src, dest)
+        dest = os.path.join(real_dest_dir, os.path.basename(real_src))
+        shutil.move(real_src, dest)
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -5271,11 +5271,11 @@ def mobile_backup_copy():
         
     try:
         import shutil
-        dest = os.path.join(dest_dir, os.path.basename(src))
-        if os.path.isdir(src):
-            shutil.copytree(src, dest)
+        dest = os.path.join(real_dest_dir, os.path.basename(real_src))
+        if os.path.isdir(real_src):
+            shutil.copytree(real_src, dest)
         else:
-            shutil.copy2(src, dest)
+            shutil.copy2(real_src, dest)
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -5308,9 +5308,9 @@ def mobile_backup_list_files():
         if not is_within_base(real_path, real_base):
             return jsonify({"error": "Akses ditolak"}), 403
 
-        os.makedirs(path, exist_ok=True)
+        os.makedirs(real_path, exist_ok=True)
         items = []
-        for entry in sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name.lower())):
+        for entry in sorted(os.scandir(real_path), key=lambda e: (not e.is_dir(), e.name.lower())):
             stat = entry.stat()
             items.append({
                 "name": entry.name,
@@ -5371,7 +5371,7 @@ def mobile_backup_upload():
     if not is_within_base(real_target, real_base):
         return jsonify({"error": "Akses ditolak"}), 403
         
-    os.makedirs(target_dir, exist_ok=True)
+    os.makedirs(real_target, exist_ok=True)
     safe_name = secure_filename(file.filename)
     if not safe_name or safe_name in {'.', '..'}:
         return jsonify({'error': 'Invalid filename'}), 400
