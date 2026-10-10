@@ -18,19 +18,24 @@ Aplikasi ini dijalankan menggunakan **Docker Compose** dan dikonfigurasi untuk b
 
 **Bagi Pengguna Baru (Install Baru):**
 ```bash
-git clone https://github.com/USERNAME/eka_dashboard.git
+git clone https://github.com/recode-project/web_server.git eka_dashboard
 cd eka_dashboard
-docker compose up --build -d
+sudo bash install.sh
 ```
 
-**Bagi Pengguna Lama (Cara Update):**
-Untuk mendapatkan fitur terbaru seperti *LXD Manager*, kamu **wajib** melakukan pull dan build ulang agar container memperbarui API backend-nya.
+Installer menyiapkan secret sesi dan token setup satu kali. Sebelum membuat akun owner, ambil token melalui shell server:
 ```bash
-cd eka_dashboard
-git pull origin main
-docker compose down
-docker compose up --build -d
+sudo sed -n 's/^SETUP_TOKEN=//p' /root/eka_dashboard/.env
 ```
+Masukkan token tersebut pada halaman Setup Admin. Jangan membagikan token ini.
+
+**Bagi Pengguna Lama (Cara Update):**
+Untuk memperbarui aplikasi, buat backup konfigurasi terlebih dahulu, lalu jalankan installer dari source yang akan dipakai:
+```bash
+cd /root/eka_dashboard
+sudo bash install.sh
+```
+Installer versi ini mempertahankan folder `data/` dan file `.env`, serta tidak mematikan layanan host atau menghapus konfigurasi keamanan secara otomatis.
 
 ---
 
