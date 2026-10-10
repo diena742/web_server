@@ -561,8 +561,8 @@ def setup_admin_api():
     username = data.get('username')
     password = data.get('password')
     
-    if not username or not password or len(password) < 4:
-        return jsonify({'error': 'Invalid input (min 4 chars)'}), 400
+    if not username or not password or len(password) < 12:
+        return jsonify({'error': 'Username and password are required; password must be at least 12 characters'}), 400
         
     # Update config - first user is always 'owner'
     config['username'] = username
@@ -1664,8 +1664,8 @@ def change_password():
     if not verify_password_hash(current_password, config.get('password_hash')):
         return jsonify({'error': 'Current password is incorrect'}), 400
     
-    if len(new_password) < 4:
-        return jsonify({'error': 'Password must be at least 4 characters'}), 400
+    if len(new_password) < 12:
+        return jsonify({'error': 'Password must be at least 12 characters'}), 400
     
     config['password_hash'] = create_password_hash(new_password)
     save_security_config(config)
@@ -1687,8 +1687,8 @@ def add_user():
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
     
-    if len(password) < 4:
-        return jsonify({'error': 'Password min 4 characters'}), 400
+    if len(password) < 12:
+        return jsonify({'error': 'Password must be at least 12 characters'}), 400
     
     # Validate role
     valid_roles = ['admin', 'operator', 'readonly']
