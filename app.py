@@ -979,50 +979,51 @@ def processes():
     return jsonify(procs[:50]) # Return top 50 to avoid overhead
 
 @app.route('/api/disk-analysis')
-@login_required
+@admin_required
 def disk_analysis():
+    """Summarize selected system disk locations for administrators."""
     def get_du(path):
         try:
-            # Run du -h --max-depth=1 | sort -hr
-            # Added timeout to prevent hanging on large disks
-            cmd = f"timeout 5s du -h --max-depth=1 {path} 2>/dev/null | sort -hr | head -n 10"
-            result = subprocess.check_output(cmd, shell=True).decode('utf-8')
+            result = subprocess.run(
+                ['du', '-h', '--max-depth=1', path],
+                capture_output=True, text=True, timeout=5
+            )
+            if not result.stdout.strip():
+                return [{'size': 'N/A', 'path': 'Timeout or Access Denied'}]
+            sorted_result = subprocess.run(
+                ['sort', '-hr'], input=result.stdout,
+                capture_output=True, text=True, timeout=2
+            )
             items = []
-            for line in result.strip().split('\n'):
-                parts = line.split('\t')
+            for line in sorted_result.stdout.splitlines()[:10]:
+                parts = line.split('\t', 1)
                 if len(parts) == 2:
                     items.append({'size': parts[0], 'path': parts[1]})
             return items
-        except subprocess.CalledProcessError:
+        except subprocess.TimeoutExpired:
             return [{'size': 'N/A', 'path': 'Timeout or Access Denied'}]
-        except Exception as e:
-            return [{'size': 'Error', 'path': str(e)}]
+        except Exception:
+            return [{'size': 'Error', 'path': 'Disk analysis failed'}]
 
-    # Analyze key directories
-    # User requested to focus only on logs
     var_logs = get_du('/var/log')
-    
-    # Try to find zram1 mount point
     zram1_path = None
     try:
-        with open('/proc/mounts', 'r') as f:
-            for line in f:
+        with open('/proc/mounts', 'r', encoding='utf-8') as handle:
+            for line in handle:
                 if 'zram1' in line:
                     parts = line.split()
                     if len(parts) >= 2:
-                        zram1_path = parts[1]
+                        zram1_path = parts[1].replace('\\040', ' ')
                         break
-    except:
+    except OSError:
         pass
 
-    zram1_data = []
-    if zram1_path:
-        zram1_data = get_du(zram1_path)
-    
+    zram1_data = get_du(zram1_path) if zram1_path else []
     return jsonify({
         'logs': var_logs,
         'zram1': {'path': zram1_path, 'data': zram1_data}
     })
+
 
 @app.route('/api/network-ports')
 @login_required
@@ -2639,36 +2640,55 @@ def get_metrics_history():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/storage/analyze')
-@login_required
+@admin_required
 def storage_analyze():
-    """Analyze top files (Requires 'scan' param path, default /)"""
-    scan_path = request.args.get('path', '/app/data') 
-    
-    # We want to scan HOST files. We mounted /:/host/root
-    prefix = "/host/root"
-    target_path = prefix
-    
+    """Return the largest entries in a host path selected by an administrator."""
+    scan_path = request.args.get('path', '/app/data')
+    if not isinstance(scan_path, str) or not scan_path or len(scan_path) > 4096 or '\\x00' in scan_path:
+        return jsonify({'error': 'Invalid scan path'}), 400
+
+    prefix = os.path.realpath('/host/root')
+    # Accept either a host-absolute path (/var/log) or an already mapped path.
+    if scan_path == prefix or scan_path.startswith(prefix + os.sep):
+        target_path = os.path.realpath(scan_path)
+    else:
+        target_path = os.path.realpath(os.path.join(prefix, scan_path.lstrip('/')))
+
     try:
-        # Run du command. It's safe-ish.
-        # du -ah --max-depth=2 /host/root | sort -rh | head -n 20
-        
-        full_cmd = f"du -ah --max-depth=2 {target_path} 2>/dev/null | sort -rh | head -n 20"
-        
-        res = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=20)
-        
-        lines = res.stdout.strip().split('\n')
+        if os.path.commonpath([prefix, target_path]) != prefix:
+            return jsonify({'error': 'Scan path is outside the host filesystem root'}), 403
+    except (OSError, ValueError):
+        return jsonify({'error': 'Invalid scan path'}), 400
+
+    if not os.path.isdir(target_path):
+        return jsonify({'error': 'Scan directory not found'}), 404
+
+    try:
+        # Use argv, not shell pipelines: the selected path may contain spaces or
+        # shell metacharacters. Sorting remains a separate argument-safe process.
+        result = subprocess.run(
+            ['du', '-ah', '--max-depth=2', target_path],
+            capture_output=True, text=True, timeout=20
+        )
+        if result.returncode != 0 and not result.stdout:
+            return jsonify({'error': 'Unable to scan directory'}), 500
+        sorted_result = subprocess.run(
+            ['sort', '-rh'], input=result.stdout,
+            capture_output=True, text=True, timeout=3
+        )
         results = []
-        for line in lines:
-            parts = line.split('\t')
-            if len(parts) == 2:
-                display_path = parts[1].replace(prefix, '') or '/'
-                results.append({'size': parts[0], 'path': display_path})
-                
+        for line in sorted_result.stdout.splitlines()[:20]:
+            parts = line.split('\t', 1)
+            if len(parts) != 2:
+                continue
+            path = parts[1]
+            display_path = path[len(prefix):] if path.startswith(prefix) else path
+            results.append({'size': parts[0], 'path': display_path or '/'})
         return jsonify({'files': results})
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Scan timed out (Disk too large/slow)'}), 408
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Scan timed out (disk too large or slow)'}), 408
+    except Exception:
+        return jsonify({'error': 'Disk analysis failed'}), 500
 
 
 # ============ UPDATE CHECKER ============
@@ -2738,44 +2758,46 @@ def check_update_layout():
 @app.route('/api/perform-update', methods=['POST'])
 @login_required
 def perform_update():
-    """Melakukan update otomatis dari GitHub dan rebuild container"""
+    """Update the deployed checkout without passing host paths through a shell."""
     if session.get('role') not in ['owner', 'admin']:
         return jsonify({'success': False, 'error': 'Akses ditolak.'}), 403
 
     try:
         import docker
+        import shlex
+
         client = docker.from_env()
-        
-        # Cari container dashboard ini
-        container = None
-        for c in client.containers.list():
-            if 'eka_dashboard' in c.name:
-                container = c
-                break
-                
-        if not container:
-            # Fallback jika tidak ketemu berdasarkan nama
+        container = next(
+            (item for item in client.containers.list() if 'eka_dashboard' in item.name),
+            None
+        )
+        if container is None:
             container = client.containers.get('eka_dashboard')
 
         working_dir = container.labels.get('com.docker.compose.project.working_dir')
-        
         if not working_dir:
-            # Fallback manual jika gagal dideteksi
             working_dir = '/root/eka_dashboard'
+        if not isinstance(working_dir, str) or not os.path.isabs(working_dir) or '\\x00' in working_dir:
+            return jsonify({'success': False, 'error': 'Direktori instalasi tidak valid.'}), 400
 
-        # Eksekusi perintah di host untuk pull kode terbaru dan build ulang
-        # Perintah ini akan berjalan di background dan otomatis me-restart container
-        update_cmd = f"cd '{working_dir}' && git pull origin main && docker compose up --build -d"
-        nsenter_cmd = f"nsenter -m -u -i -n -p -t 1 sh -c \"{update_cmd}\""
-        
-        subprocess.Popen(nsenter_cmd, shell=True)
-        
+        # Quote the path for the inner shell and pass nsenter as argv; never use
+        # shell=True to assemble the outer command from container metadata.
+        update_cmd = (
+            f"cd {shlex.quote(working_dir)} && "
+            "git pull origin main && docker compose up --build -d"
+        )
+        nsenter_cmd = [
+            'nsenter', '-m', '-u', '-i', '-n', '-p', '-t', '1',
+            'sh', '-c', update_cmd
+        ]
+        subprocess.Popen(nsenter_cmd, shell=False, close_fds=True, start_new_session=True)
+
         return jsonify({
-            'success': True, 
-            'message': 'Sistem sedang memperbarui diri. Harap tunggu sekitar 1-2 menit lalu muat ulang halaman (Refresh).'
+            'success': True,
+            'message': 'Sistem sedang memperbarui diri. Muat ulang halaman setelah update selesai.'
         })
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'Gagal menjalankan pembaruan: {str(e)}'}), 500
+    except Exception:
+        return jsonify({'success': False, 'error': 'Gagal menjalankan pembaruan.'}), 500
 
 # ========================================
 
