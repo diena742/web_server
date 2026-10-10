@@ -5088,7 +5088,8 @@ def mobile_backup_copy():
     real_dest_dir = os.path.realpath(dest_dir)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
     
-    if not real_src.startswith(real_base) or not real_dest_dir.startswith(real_base):
+    if (not is_within_base(real_src, real_base) or real_src == real_base
+            or not is_within_base(real_dest_dir, real_base)):
         return jsonify({"error": "Akses ditolak"}), 403
         
     try:
@@ -5127,7 +5128,7 @@ def mobile_backup_list_files():
         # Keamanan: pastikan path tidak keluar dari BACKUP_BASE_DIR
         real_path = os.path.realpath(path)
         real_base = os.path.realpath(BACKUP_BASE_DIR)
-        if not real_path.startswith(real_base):
+        if not is_within_base(real_path, real_base):
             return jsonify({"error": "Akses ditolak"}), 403
 
         os.makedirs(path, exist_ok=True)
@@ -5160,7 +5161,7 @@ def mobile_backup_delete():
     path = data.get('path', '')
     real_path = os.path.realpath(path)
     real_base = os.path.realpath(BACKUP_BASE_DIR)
-    if not real_path.startswith(real_base):
+    if not is_within_base(real_path, real_base) or real_path == real_base:
         return jsonify({"error": "Akses ditolak"}), 403
     try:
         if os.path.isdir(real_path):
