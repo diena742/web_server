@@ -6090,32 +6090,58 @@ def web_monitor_page():
     # If no domain is configured, frontend will handle the prompt
     return render_template('web_monitor.html')
 
+def normalize_web_shield_domain(value):
+    """Accept a hostname/IP literal only; reject paths, ports and URL fragments."""
+    if not isinstance(value, str):
+        return None
+    domain = value.strip()
+    lower = domain.lower()
+    if lower.startswith('https://'):
+        domain = domain[8:]
+    elif lower.startswith('http://'):
+        domain = domain[7:]
+    domain = domain.rstrip('/')
+    # URL paths, credentials, ports, query strings and fragments are not domains.
+    if not domain or len(domain) > 253 or any(ch in domain for ch in '/\\?#@:'):
+        return None
+    domain = domain.rstrip('.')
+    if not domain:
+        return None
+    labels = domain.split('.')
+    if any(
+        not _re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label)
+        for label in labels
+    ):
+        return None
+    return domain.lower()
+
+
 def get_web_shield_domain():
     config_path = os.path.join(DATA_DIR, 'web_shield.json')
     if os.path.exists(config_path):
         try:
-            with open(config_path, 'r') as f:
-                return json.load(f).get('domain', None)
-        except: pass
+            with open(config_path, 'r', encoding='utf-8') as f:
+                raw_domain = json.load(f).get('domain')
+            return normalize_web_shield_domain(raw_domain)
+        except Exception:
+            return None
     return None
+
 
 @app.route('/api/web_monitor/config', methods=['GET', 'POST'])
 @admin_required
 def web_monitor_config():
     config_path = os.path.join(DATA_DIR, 'web_shield.json')
     if request.method == 'POST':
-        if session.get('role') not in ('owner', 'admin'):
-            return jsonify({'error': 'Admin access required'}), 403
         data = request.get_json(silent=True) or {}
-        domain = data.get('domain')
+        domain = normalize_web_shield_domain(data.get('domain'))
         if not domain:
-            return jsonify({'error': 'Domain required'}), 400
-        # Clean domain (remove http/https)
-        domain = domain.replace('https://', '').replace('http://', '').strip('/')
-        with open(config_path, 'w') as f:
+            return jsonify({'error': 'Valid hostname or IP address is required'}), 400
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump({'domain': domain}, f)
         return jsonify({'success': True, 'domain': domain})
-    
+
     return jsonify({'domain': get_web_shield_domain()})
 
 import ssl
@@ -6144,7 +6170,7 @@ def check_ssl_expiry(domain):
         return {"days_left": 0, "issuer": "Unknown", "error": str(e)}
 
 @app.route('/api/web_monitor/status')
-@login_required
+@admin_required
 def web_monitor_status():
     """Mengambil Hardware, SSL, dan Uptime Status"""
     domain = get_web_shield_domain()
@@ -6195,14 +6221,14 @@ def web_monitor_status():
     })
 
 @app.route('/api/web_monitor/ssl_details')
-@login_required
+@admin_required
 def web_monitor_ssl_details():
     domain = get_web_shield_domain()
     if not domain: return jsonify({"error": "not_configured"}), 400
     return jsonify(check_ssl_expiry(domain))
 
 @app.route('/api/web_monitor/traffic')
-@login_required
+@admin_required
 def web_monitor_traffic():
     """Parse Nginx Access Log untuk Traffic Real-Time, Top Pages, Origin, dan Session Duration"""
     log_path = '/host/root/var/log/nginx/access.log'
@@ -6263,7 +6289,7 @@ def web_monitor_traffic():
     })
 
 @app.route('/api/web_monitor/bot_details')
-@login_required
+@admin_required
 def web_monitor_bot_details():
     log_path = '/host/root/var/log/nginx/access.log'
     blocked_list = []
@@ -6302,24 +6328,62 @@ def web_monitor_security():
 @app.route('/api/web_monitor/backup')
 @admin_required
 def web_monitor_backup():
-    """Backup /var/www/{domain} menjadi ZIP"""
+    """Create a ZIP backup only from a validated domain directory under web root."""
     domain = get_web_shield_domain()
-    if not domain: return jsonify({"error": "not_configured"}), 400
-    source_dir = f'/host/root/var/www/{domain}'
-    zip_filename = f"web_shield_backup_{int(time.time())}.zip"
-    zip_path = os.path.join('/tmp', zip_filename)
-    
+    if not domain:
+        return jsonify({"error": "not_configured"}), 400
+
+    base_dir = os.path.realpath('/host/root/var/www')
+    source_dir = os.path.realpath(os.path.join(base_dir, domain))
     try:
+        if os.path.commonpath([base_dir, source_dir]) != base_dir:
+            return jsonify({"error": "Domain path is outside the web root"}), 403
+    except (OSError, ValueError):
+        return jsonify({"error": "Invalid domain path"}), 400
+    if not os.path.isdir(source_dir):
+        return jsonify({"error": "Website directory not found"}), 404
+
+    import tempfile
+    zip_path = None
+    try:
+        fd, zip_path = tempfile.mkstemp(prefix='web_shield_backup_', suffix='.zip', dir='/tmp')
+        os.close(fd)
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for root, dirs, files in os.walk(source_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, source_dir)
-                    zipf.write(file_path, arcname)
-                    
-        return send_file(zip_path, as_attachment=True, download_name=zip_filename)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            for root, dirs, files in os.walk(source_dir, followlinks=False):
+                dirs[:] = [
+                    dirname for dirname in dirs
+                    if not os.path.islink(os.path.join(root, dirname))
+                ]
+                for filename in files:
+                    candidate = os.path.join(root, filename)
+                    if os.path.islink(candidate):
+                        continue
+                    file_path = os.path.realpath(candidate)
+                    try:
+                        if os.path.commonpath([source_dir, file_path]) != source_dir:
+                            continue
+                    except (OSError, ValueError):
+                        continue
+                    if not os.path.isfile(file_path):
+                        continue
+                    zipf.write(file_path, os.path.relpath(file_path, source_dir))
+
+        response = send_file(
+            zip_path,
+            as_attachment=True,
+            download_name=os.path.basename(zip_path),
+        )
+        response.call_on_close(
+            lambda path=zip_path: os.path.exists(path) and os.remove(path)
+        )
+        return response
+    except Exception:
+        if zip_path and os.path.exists(zip_path):
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
+        return jsonify({"error": "Unable to create website backup"}), 500
 
 
 @app.route('/lxd')
