@@ -122,20 +122,21 @@ Installer tidak mengubah port CasaOS. Jika CasaOS memakai port 80, atur `DASHBOA
 
 **2. Bagaimana cara mengganti Port Eka Dashboard agar tidak menggunakan Port 80?**
 1. Masuk ke direktori instalasi: `cd /root/eka_dashboard`
-2. Buka file konfigurasi: `nano docker-compose.yml`
-3. Ubah bagian `ports:` dari `- "80:5000"` menjadi `- "8080:5000"` (atau port lain).
-4. Simpan perubahan (Ctrl+X, ketik Y, lalu Enter).
-5. Terapkan: `sudo docker compose up -d`
-6. Akses di: `http://IP-SERVER:8080`
+2. Tambahkan konfigurasi port ke file `.env`: `printf 'DASHBOARD_PORT=8080\\n' >> .env`
+3. Terapkan: `sudo docker compose up -d`
+4. Akses di: `http://IP-SERVER:8080`
 
-**3. Saya lupa Password Admin, bagaimana cara me-resetnya?**
-Hapus file konfigurasi keamanan lalu *restart container*:
+Pastikan port yang dipilih belum digunakan proses lain.
+
+**3. Saya lupa Password Admin, bagaimana cara meresetnya?**
+Jangan menghapus `data/security_config.json` pada server yang masih terjangkau jaringan. Penghapusan file tersebut mengaktifkan kembali setup awal dan dapat memungkinkan pengguna lain mengambil alih akun owner. Gunakan pemulihan melalui akses shell/console tepercaya dan siapkan backup konfigurasi sebelum melakukan perubahan. Jika dashboard masih berjalan, reset hash password utama melalui Python di dalam container:
+
 ```bash
 cd /root/eka_dashboard
-sudo rm data/security_config.json
-sudo docker compose restart
+sudo docker exec -it eka_dashboard python -c 'import getpass, app; cfg=app.load_security_config(); pw=getpass.getpass("Password baru (min. 12 karakter): "); assert len(pw) >= 12, "Password terlalu pendek"; cfg["password_hash"]=app.create_password_hash(pw); app.save_security_config(cfg); print("Password owner diperbarui.")'
 ```
-Buka kembali dashboard, Anda akan diminta membuat *password* baru.
+
+Perintah ini hanya memperbarui hash password akun utama dan mempertahankan konfigurasi pengguna lainnya. Jalankan hanya dari shell server yang tepercaya.
 
 **4. Error "Permission denied" saat menjalankan script `install.sh`.**
 Anda membutuhkan hak eksekusi. Ketik perintah `chmod +x install.sh` lalu jalankan kembali menggunakan `sudo bash install.sh`.
