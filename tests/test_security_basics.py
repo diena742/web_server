@@ -653,6 +653,10 @@ class HostManagementReadAuthorizationTests(unittest.TestCase):
             "/api/websites/threats",
             "/api/websites/threats/blocked_ips",
             "/api/web_monitor/config",
+            "/api/web_monitor/status",
+            "/api/web_monitor/ssl_details",
+            "/api/web_monitor/traffic",
+            "/api/web_monitor/bot_details",
             "/api/web_monitor/security",
             "/api/web_monitor/backup",
             "/api/webpanel/database",
@@ -665,6 +669,70 @@ class HostManagementReadAuthorizationTests(unittest.TestCase):
             }
         self.assertEqual(statuses, {path: 403 for path in protected_endpoints})
         host_command.assert_not_called()
+
+
+
+class WebShieldDomainValidationTests(unittest.TestCase):
+    def test_domain_normalizer_accepts_hosts_and_rejects_paths(self):
+        self.assertEqual(
+            dashboard.normalize_web_shield_domain("HTTPS://Example.COM/"),
+            "example.com",
+        )
+        self.assertEqual(
+            dashboard.normalize_web_shield_domain("example.com."),
+            "example.com",
+        )
+        for value in (
+            "../etc/passwd",
+            "example.com/path",
+            "user@example.com",
+            "example.com:443",
+            "example.com?next=internal",
+            "",
+            None,
+        ):
+            with self.subTest(value=value):
+                self.assertIsNone(dashboard.normalize_web_shield_domain(value))
+
+    def test_web_monitor_config_rejects_path_traversal_domain(self):
+        import tempfile
+        dashboard.app.testing = True
+        client = dashboard.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "admin-user",
+                "role": "admin",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+        config = {"require_auth": True, "session_timeout": 3600}
+        with tempfile.TemporaryDirectory() as data_dir, \
+             patch.object(dashboard, "DATA_DIR", data_dir), \
+             patch.object(dashboard, "load_security_config", return_value=config):
+            response = client.post(
+                "/api/web_monitor/config",
+                json={"domain": "../../etc/passwd"},
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertFalse(os.path.exists(os.path.join(data_dir, "web_shield.json")))
+
+    def test_web_monitor_backup_rejects_path_outside_web_root(self):
+        dashboard.app.testing = True
+        client = dashboard.app.test_client()
+        with client.session_transaction() as sess:
+            sess.update({
+                "logged_in": True,
+                "username": "admin-user",
+                "role": "admin",
+                "login_time": time.time(),
+                "last_active": time.time(),
+            })
+        config = {"require_auth": True, "session_timeout": 3600}
+        with patch.object(dashboard, "load_security_config", return_value=config), \
+             patch.object(dashboard, "get_web_shield_domain", return_value="../etc"):
+            response = client.get("/api/web_monitor/backup")
+        self.assertEqual(response.status_code, 403)
 
 
 if __name__ == "__main__":
