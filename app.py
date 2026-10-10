@@ -10,6 +10,7 @@ import subprocess
 import os
 import select
 import struct
+import signal
 import hashlib
 import hmac
 import json
@@ -1194,105 +1195,205 @@ def terminal_page():
     return render_template('terminal.html')
 
 # WebSocket handlers for terminal
+def socket_permission_allowed(feature):
+    """Validate authentication, session timeout and role for each socket event."""
+    if not session.get('logged_in'):
+        emit('terminal_error', {'error': 'Authentication required'})
+        return False
+
+    config = load_security_config()
+    timeout = config.get('session_timeout', 3600)
+    last_active = session.get('last_active', session.get('login_time', time.time()))
+    try:
+        expired = time.time() - float(last_active) > float(timeout)
+    except (TypeError, ValueError):
+        expired = True
+
+    if expired:
+        session.clear()
+        emit('terminal_error', {'error': 'Session expired. Please sign in again.'})
+        return False
+
+    role = session.get('role', 'readonly')
+    if not has_permission(role, feature):
+        emit('terminal_error', {'error': 'Permission denied'})
+        return False
+
+    session['last_active'] = time.time()
+    return True
+
+
+def stop_terminal_session(terminal_key):
+    """Close one PTY and terminate its process group, if still present."""
+    terminal = terminal_sessions.pop(terminal_key, None)
+    if not terminal:
+        return
+    try:
+        os.close(terminal['fd'])
+    except OSError:
+        pass
+    pid = terminal.get('pid')
+    if pid:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (OSError, ProcessLookupError):
+                pass
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except (OSError, ChildProcessError):
+            pass
+
+
 @socketio.on('start_terminal')
 def handle_start_terminal(data):
-    session_id = data.get('session_id', 'default')
-    start_path = data.get('path', '/root')
-    
-    # Create PTY
+    if not socket_permission_allowed('terminal'):
+        return
+    if not isinstance(data, dict):
+        emit('terminal_error', {'error': 'Invalid terminal request'})
+        return
+
+    session_id = str(data.get('session_id') or 'default')
+    if len(session_id) > 100:
+        emit('terminal_error', {'error': 'Invalid session ID'})
+        return
+    terminal_key = f"{request.sid}:{session_id}"
+
+    # Session IDs from different browser sockets must never collide or share
+    # the same PTY. Restarting a tab with the same ID only affects that socket.
+    stop_terminal_session(terminal_key)
+
     master_fd, slave_fd = pty.openpty()
-    
-    # Fork shell
     pid = os.fork()
     if pid == 0:
-        # Child process
-        os.close(master_fd)
-        os.setsid()
-        os.dup2(slave_fd, 0)
-        os.dup2(slave_fd, 1)
-        os.dup2(slave_fd, 2)
-        os.close(slave_fd)
-        
-        lxd_target = data.get('lxd_target')
-        
-        # Use nsenter to enter host PID 1 namespace (root shell on host)
-        # Assuming container is privileged and shares PID namespace
-        # Adding -i to bash for interactive mode and setting TERM/SHELL
-        os.environ['TERM'] = 'xterm-256color'
-        os.environ['SHELL'] = '/bin/bash'
-        
-        if lxd_target:
-            cmd = ['nsenter', '-t', '1', '-m', '-u', '-n', '-i', 'lxc', 'exec', lxd_target, '--', 'bash', '--login', '-i']
-        else:
-            # Perintah ini akan membersihkan layar, menjalankan neofetch, lalu masuk ke bash interaktif
-            cmd = ['nsenter', '-t', '1', '-m', '-u', '-n', '-i', 'bash', '--login', '-c', 'clear && neofetch && exec bash -i']
-            
-        os.execvp('nsenter', cmd)
+        try:
+            os.close(master_fd)
+            os.setsid()
+            os.dup2(slave_fd, 0)
+            os.dup2(slave_fd, 1)
+            os.dup2(slave_fd, 2)
+            os.close(slave_fd)
+
+            lxd_target = data.get('lxd_target')
+            os.environ['TERM'] = 'xterm-256color'
+            os.environ['SHELL'] = '/bin/bash'
+
+            if lxd_target:
+                lxd_target = str(lxd_target)
+                if len(lxd_target) > 128 or not lxd_target.strip():
+                    os._exit(2)
+                cmd = [
+                    'nsenter', '-t', '1', '-m', '-u', '-n', '-i',
+                    'lxc', 'exec', lxd_target, '--', 'bash', '--login', '-i'
+                ]
+            else:
+                cmd = [
+                    'nsenter', '-t', '1', '-m', '-u', '-n', '-i',
+                    'bash', '--login', '-c',
+                    'clear && (command -v neofetch >/dev/null 2>&1 && neofetch || true) && exec bash -i'
+                ]
+            os.execvp('nsenter', cmd)
+        except Exception:
+            os._exit(127)
     else:
-        # Parent process
         os.close(slave_fd)
-        terminal_sessions[session_id] = {
+        terminal_sessions[terminal_key] = {
             'fd': master_fd,
-            'pid': pid
+            'pid': pid,
+            'owner_sid': request.sid,
+            'client_session_id': session_id,
+            'username': session.get('username', '')
         }
-        
-        # Start reading thread
-        socketio.start_background_task(read_terminal_output, session_id, master_fd)
+        socketio.start_background_task(read_terminal_output, terminal_key, master_fd)
         emit('terminal_started', {'session_id': session_id})
 
-def read_terminal_output(session_id, fd):
+
+def read_terminal_output(terminal_key, fd):
     import eventlet
-    while session_id in terminal_sessions:
+    while terminal_key in terminal_sessions:
         eventlet.sleep(0.01)
+        terminal = terminal_sessions.get(terminal_key)
+        if not terminal:
+            break
         try:
             if select.select([fd], [], [], 0.1)[0]:
-                data = os.read(fd, 1024)
-                if data:
-                    socketio.emit('terminal_output', {
-                        'session_id': session_id,
-                        'data': data.decode('utf-8', errors='replace')
-                    })
-        except:
+                data = os.read(fd, 4096)
+                if not data:
+                    break
+                socketio.emit('terminal_output', {
+                    'session_id': terminal.get('client_session_id'),
+                    'data': data.decode('utf-8', errors='replace')
+                }, to=terminal.get('owner_sid'))
+        except (OSError, ValueError):
             break
+    # Avoid keeping dead descriptors/sessions after shell exits.
+    terminal = terminal_sessions.get(terminal_key)
+    if terminal and terminal.get('fd') == fd:
+        stop_terminal_session(terminal_key)
+
 
 @socketio.on('terminal_input')
 def handle_terminal_input(data):
-    session_id = data.get('session_id', 'default')
+    if not socket_permission_allowed('terminal'):
+        return
+    if not isinstance(data, dict):
+        return
+    session_id = str(data.get('session_id') or 'default')
+    terminal = terminal_sessions.get(f"{request.sid}:{session_id}")
     input_data = data.get('input', '')
-    
-    if session_id in terminal_sessions:
-        fd = terminal_sessions[session_id]['fd']
-        try:
-            os.write(fd, input_data.encode())
-        except:
-            pass
+    if not terminal or terminal.get('owner_sid') != request.sid:
+        emit('terminal_error', {'error': 'Terminal session not found'})
+        return
+    if not isinstance(input_data, str) or len(input_data) > 65536:
+        emit('terminal_error', {'error': 'Invalid terminal input'})
+        return
+    try:
+        os.write(terminal['fd'], input_data.encode('utf-8'))
+    except OSError:
+        emit('terminal_error', {'error': 'Terminal is no longer available'})
+
 
 @socketio.on('terminal_resize')
 def handle_terminal_resize(data):
-    session_id = data.get('session_id', 'default')
-    rows = data.get('rows', 24)
-    cols = data.get('cols', 80)
-    
-    if session_id in terminal_sessions:
-        fd = terminal_sessions[session_id]['fd']
-        try:
-            winsize = struct.pack('HHHH', rows, cols, 0, 0)
-            fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
-        except:
-            pass
+    if not socket_permission_allowed('terminal'):
+        return
+    if not isinstance(data, dict):
+        return
+    session_id = str(data.get('session_id') or 'default')
+    terminal = terminal_sessions.get(f"{request.sid}:{session_id}")
+    if not terminal or terminal.get('owner_sid') != request.sid:
+        return
+    try:
+        rows = max(1, min(int(data.get('rows', 24)), 500))
+        cols = max(1, min(int(data.get('cols', 80)), 1000))
+        winsize = struct.pack('HHHH', rows, cols, 0, 0)
+        fcntl.ioctl(terminal['fd'], termios.TIOCSWINSZ, winsize)
+    except (OSError, ValueError, TypeError, struct.error):
+        pass
+
 
 @socketio.on('stop_terminal')
 def handle_stop_terminal(data):
-    session_id = data.get('session_id', 'default')
-    
-    if session_id in terminal_sessions:
-        session = terminal_sessions.pop(session_id)
-        try:
-            os.close(session['fd'])
-            os.kill(session['pid'], 9)
-            os.waitpid(session['pid'], 0)
-        except:
-            pass
+    if not socket_permission_allowed('terminal'):
+        return
+    if not isinstance(data, dict):
+        return
+    session_id = str(data.get('session_id') or 'default')
+    terminal_key = f"{request.sid}:{session_id}"
+    terminal = terminal_sessions.get(terminal_key)
+    if terminal and terminal.get('owner_sid') == request.sid:
+        stop_terminal_session(terminal_key)
+
+
+@socketio.on('disconnect')
+def handle_socket_disconnect():
+    """Ensure a disconnected browser cannot leave a live host shell behind."""
+    owner_sid = request.sid
+    for terminal_key, terminal in list(terminal_sessions.items()):
+        if terminal.get('owner_sid') == owner_sid:
+            stop_terminal_session(terminal_key)
 
 # --- DOCKER ROUTES ---
 import docker as docker_sdk
