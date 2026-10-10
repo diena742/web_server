@@ -1597,7 +1597,7 @@ def docker_action(container_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/docker/<container_id>/logs')
-@requires_permission('docker', 'view')
+@requires_permission('docker', 'full')
 def docker_logs(container_id):
     try:
         lines = request.args.get('lines', 200, type=int)
@@ -1656,20 +1656,36 @@ def update_security_config():
 @login_required
 def change_password():
     config = load_security_config()
-    data = request.json
-    
+    data = request.get_json(silent=True) or {}
+
     current_password = data.get('current_password', '')
     new_password = data.get('new_password', '')
-    
-    if not verify_password_hash(current_password, config.get('password_hash')):
-        return jsonify({'error': 'Current password is incorrect'}), 400
-    
+    username = session.get('username')
+
+    if not isinstance(current_password, str) or not isinstance(new_password, str):
+        return jsonify({'error': 'Invalid password input'}), 400
     if len(new_password) < 12:
         return jsonify({'error': 'Password must be at least 12 characters'}), 400
-    
-    config['password_hash'] = create_password_hash(new_password)
+
+    # A signed-in user can change only their own password. The previous code
+    # compared every account against the owner password and then overwrote it.
+    if username == config.get('username'):
+        if not verify_password_hash(current_password, config.get('password_hash')):
+            return jsonify({'error': 'Current password is incorrect'}), 400
+        config['password_hash'] = create_password_hash(new_password)
+    else:
+        user = next(
+            (item for item in config.get('users', []) if item.get('username') == username),
+            None
+        )
+        if not user:
+            return jsonify({'error': 'Account not found'}), 403
+        if not verify_password_hash(current_password, user.get('password_hash')):
+            return jsonify({'error': 'Current password is incorrect'}), 400
+        user['password_hash'] = create_password_hash(new_password)
+
     save_security_config(config)
-    audit_log('PASSWORD_CHANGED', 'Password was changed', session.get('username', 'unknown'))
+    audit_log('PASSWORD_CHANGED', 'Password was changed', username or 'unknown')
     return jsonify({'success': True})
 
 @app.route('/api/security/users', methods=['POST'])
@@ -1906,9 +1922,21 @@ def get_monitoring_config():
     return jsonify({'mqtt': safe_mqtt})
 
 @app.route('/api/settings')
-@login_required
+@requires_permission('settings', 'view')
 def get_settings():
-    return jsonify(load_app_settings())
+    settings = load_app_settings()
+    # Operators and read-only users may inspect non-sensitive configuration,
+    # but must not receive integration credentials through this API.
+    if session.get('role') not in ('owner', 'admin'):
+        integrations = settings.get('integrations', {})
+        if isinstance(integrations, dict):
+            for key in ('telegram_token', 'telegram_chat_id', 'webhook_url'):
+                if key in integrations:
+                    integrations[key] = ''
+        mqtt = settings.get('mqtt', {})
+        if isinstance(mqtt, dict) and 'password' in mqtt:
+            mqtt['password'] = ''
+    return jsonify(settings)
 
 @app.route('/api/settings', methods=['POST'])
 @requires_permission('settings', 'full')
@@ -5802,7 +5830,7 @@ def panel_docker_page():
     return render_template('panel_docker.html')
 
 @app.route('/api/panel_docker/containers')
-@login_required
+@requires_permission('docker', 'view')
 def panel_docker_containers():
     """Daftar semua Docker containers dengan stats"""
     containers_data = []
