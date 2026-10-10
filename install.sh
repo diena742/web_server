@@ -46,7 +46,7 @@ if [ "$CURRENT_DIR" != "$INSTALL_DIR" ]; then
     
     # Exclude data folder dari copy agar tidak menimpa data user (meskipun di zip kosong)
     # Gunakan cp -rf untuk overwrite code
-    cp -rf "$CURRENT_DIR/"* "$INSTALL_DIR/" 2>/dev/null
+    find "$CURRENT_DIR" -mindepth 1 -maxdepth 1 ! -name 'data' ! -name '.env' ! -name '.git' -exec cp -rf {} "$INSTALL_DIR/" \;
     
     # 3. Pindah ke folder instalasi
     echo -e "Pindah ke $INSTALL_DIR untuk melanjutkan instalasi..."
@@ -58,7 +58,11 @@ fi
 
 # --- STEP 1: Port configuration (non-destructive) ---
 # Never rewrite CasaOS configuration or stop arbitrary host processes automatically.
-DASHBOARD_PORT="${DASHBOARD_PORT:-80}"
+ENV_DASHBOARD_PORT=""
+if [ -f ".env" ]; then
+    ENV_DASHBOARD_PORT="$(sed -n 's/^DASHBOARD_PORT=//p' .env | tail -n 1)"
+fi
+DASHBOARD_PORT="${DASHBOARD_PORT:-${ENV_DASHBOARD_PORT:-80}}"
 if ! [[ "$DASHBOARD_PORT" =~ ^[0-9]+$ ]] || [ "$DASHBOARD_PORT" -lt 1 ] || [ "$DASHBOARD_PORT" -gt 65535 ]; then
     echo -e "${RED}[ERROR] DASHBOARD_PORT harus berupa angka 1-65535.${NC}"
     exit 1
