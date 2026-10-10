@@ -566,7 +566,7 @@ class HostCommandSafetyTests(unittest.TestCase):
         import docker
         container = type("Container", (), {
             "name": "eka_dashboard",
-            "labels": {"com.docker.compose.project.working_dir": "/tmp/unsafe\\x00path"},
+            "labels": {"com.docker.compose.project.working_dir": "/tmp/unsafe\x00path"},
         })()
         client = type("DockerClient", (), {
             "containers": type("Containers", (), {
