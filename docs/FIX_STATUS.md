@@ -33,6 +33,8 @@ Branch pengembangan memiliki patch keamanan dan perbaikan fungsional, serta tes 
 - Endpoint daftar Mobile Backup tidak lagi membuat subdirektori sembarang saat GET, dan mengabaikan entry symlink.
 - Upload Mobile Backup menolak nama yang tidak valid serta menolak file tujuan yang sudah ada.
 - Deteksi IP LAN/Tailscale tidak menggunakan alamat contoh yang tertanam di source; alamat dideteksi dari network namespace host atau diberikan melalui environment/config yang tervalidasi.
+- Operasi rename/move/copy tidak menimpa tujuan yang sudah ada dan tidak dapat memindahkan/menyalin direktori ke dalam dirinya sendiri.
+- Deteksi IP LAN/Tailscale tidak menggunakan alamat contoh yang tertanam di source; alamat dideteksi dari network namespace host atau diberikan melalui environment/config yang tervalidasi.
 - Endpoint kontrol service dan pembacaan analisis disk memakai validasi input/allowlist serta argumen subprocess terpisah. Endpoint analisis disk/storage dibatasi untuk admin.
 - Endpoint update menggunakan direktori kerja absolut yang tervalidasi, quoting untuk perintah di shell bagian dalam, dan argv luar dengan `shell=False`. Pembacaan model CPU tidak lagi memanggil shell.
 - Endpoint `/api/network-details` dibatasi untuk admin.
@@ -42,6 +44,8 @@ Branch pengembangan memiliki patch keamanan dan perbaikan fungsional, serta tes 
 - Pembuatan backup memakai lokasi canonical `APP_SETTINGS_FILE` dan `SECURITY_CONFIG_FILE`, bukan nama/lokasi lama.
 - Restore hanya memproses file regular yang namanya masuk allowlist, menulis ke lokasi canonical lewat file sementara dan penggantian atomik, dan tidak mengekstrak entri symlink/hardlink.
 - Download arsip backup dibatasi untuk admin.
+- Unduh/restore/hapus arsip hanya menerima ID nama file `.tar.gz` sederhana di dalam direktori backup; symlink arsip dan path yang keluar dari direktori ditolak. Daftar backup mengabaikan symlink dan file khusus.
+- Restore menolak body JSON yang bukan objek dan hanya memproses file regular dalam allowlist.
 - Domain website dinormalisasi dan divalidasi sebagai hostname sebelum disimpan.
 - ZIP backup website dibatasi agar tetap di bawah web root, melewati symlink, menggunakan nama file sementara unik, dan menghapus arsip sementara sesudah respons ditutup.
 - API web monitor yang membaca log/keadaan host dibatasi untuk admin.
@@ -54,13 +58,13 @@ Branch pengembangan memiliki patch keamanan dan perbaikan fungsional, serta tes 
 
 ## Validasi otomatis
 
-Workflow: [Source Validation](https://github.com/diena742/web_server/actions/runs/38048784663)
+Workflow: [Source Validation](https://github.com/diena742/web_server/actions/runs/38048972065)
 
-Hasil commit `dec10014c9e72a5602c9cf12c2889606e1b631ac`:
+Hasil commit `25bf074819194a200b02d2870ecc01e4a345b9fa`:
 
 - Kompilasi sumber Python: sukses.
 - Instalasi dependensi: sukses.
-- Unit/regression tests: **44 tes lulus**.
+- Unit/regression tests: **47 tes lulus**.
 - Validasi sintaks `static/script.js` dan `static/files.js`: sukses.
 - Validasi sintaks `install.sh` dan `setup_wg.sh`: sukses.
 
