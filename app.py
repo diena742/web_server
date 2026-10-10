@@ -104,13 +104,30 @@ mqtt_client = None
 HOME_DEVICES_STATE = {}
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or os.urandom(32).hex()
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE=os.environ.get('SESSION_COOKIE_SAMESITE', 'Lax'),
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '0') == '1'
+)
 app.config['UPLOAD_FOLDER'] = DATA_DIR
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB Limit
 
 # ==============================================
-CORS(app, supports_credentials=True)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Browser CORS and Socket.IO are same-origin by default. Cross-origin access
+# must be explicitly allowlisted using DASHBOARD_ALLOWED_ORIGINS.
+DASHBOARD_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('DASHBOARD_ALLOWED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+if DASHBOARD_ALLOWED_ORIGINS:
+    CORS(app, supports_credentials=True, origins=DASHBOARD_ALLOWED_ORIGINS)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins=DASHBOARD_ALLOWED_ORIGINS or None,
+    async_mode='eventlet'
+)
 
 # Terminal sessions storage
 terminal_sessions = {}
